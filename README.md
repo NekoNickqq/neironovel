@@ -40,18 +40,18 @@ rp-novel-engine/
 └── start.sh               # Запуск всех сервисов
 ```
 
-## 🚀 Быстрый старт
+## 🚀 Быстрый старт (Windows)
 
-### 1. Установка
+### 1. Установка (один раз)
 
-```bash
-# Backend
+**Двойной клик по `install-backend.bat`**
+
+Или вручную:
+```cmd
 cd backend
-bash setup.sh
-
-# Frontend
-cd ../frontend
-npm install
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
 ### 2. Настройка
@@ -65,19 +65,27 @@ COMFYUI_URL=http://192.168.1.107:1215
 
 ### 3. Запуск
 
-```bash
-# Все сервисы сразу
-bash start.sh
+**Двойной клик по `start.bat`**
 
-# Или по отдельности:
-# Terminal 1 - Backend
-cd backend && source venv/bin/activate && python main.py
+Или вручную:
+```cmd
+:: Terminal 1 - Backend
+cd backend
+venv\Scripts\activate
+python main.py
 
-# Terminal 2 - Frontend
-cd frontend && npm run dev
+:: Terminal 2 - Frontend
+cd frontend
+npm run dev
 ```
 
-### 4. Открыть
+### 4. Проверка статуса
+
+**Двойной клик по `check-status.bat`**
+
+Покажет что работает, а что нет.
+
+### 5. Открыть
 
 - Frontend: http://localhost:5173
 - Backend API: http://localhost:8000
