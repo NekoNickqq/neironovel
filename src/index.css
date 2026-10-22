@@ -1,1 +1,112 @@
 @import "tailwindcss";
+
+@theme {
+  --color-accent: #8b5cf6;
+  --color-accent-light: #a78bfa;
+  --color-accent-dark: #6d28d9;
+  --color-surface: #1e1b2e;
+  --color-surface-light: #2d2845;
+  --color-surface-dark: #13111f;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background: #0a0a12;
+  overflow-x: hidden;
+}
+
+.font-narrator {
+  font-family: 'Cinzel', 'Georgia', serif;
+  font-style: italic;
+  color: #c4b5fd;
+}
+
+.font-hero {
+  font-family: 'Roboto', sans-serif;
+  font-weight: 600;
+  color: #60a5fa;
+}
+
+.font-sidekick {
+  font-family: 'Open Sans', sans-serif;
+  color: #34d399;
+}
+
+.font-user {
+  font-family: 'Inter', sans-serif;
+  color: #e2e8f0;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #4c1d95;
+  border-radius: 3px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #6d28d9;
+}
+
+.vn-text-box {
+  background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.8) 70%, transparent 100%);
+}
+
+.message-enter {
+  animation: messageSlide 0.3s ease-out;
+}
+
+@keyframes messageSlide {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 5px rgba(139, 92, 246, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(139, 92, 246, 0.6); }
+}
+
+.generating {
+  animation: pulse-glow 1.5s infinite;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(100%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.4s ease-out forwards;
+}
+
+/* Custom selection color */
+::selection {
+  background: rgba(139, 92, 246, 0.3);
+  color: white;
+}
+
+/* Smooth transitions for view changes */
+.view-transition {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}

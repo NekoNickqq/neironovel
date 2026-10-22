@@ -1,5 +1,30 @@
+import { AppProvider, useApp } from './store';
+import { DialogueList } from './components/DialogueList';
+import { CreateDialogue } from './components/CreateDialogue';
+import { ChatMode } from './components/ChatMode';
+import { VisualNovelMode } from './components/VisualNovelMode';
+
+function AppContent() {
+  const { state } = useApp();
+
+  switch (state.currentView) {
+    case 'list':
+      return <DialogueList />;
+    case 'create':
+      return <CreateDialogue />;
+    case 'chat':
+      return <ChatMode />;
+    case 'novel':
+      return <VisualNovelMode />;
+    default:
+      return <DialogueList />;
+  }
+}
+
 export default function App() {
   return (
-    <div/>
+    <AppProvider>
+      <AppContent />
+    </AppProvider>
   );
 }
