@@ -1,11 +1,12 @@
 import json
+import os
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, JSON
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import sessionmaker, relationship, DeclarativeBase
 from config import config
 
-Base = declarative_base()
+class Base(DeclarativeBase):
+    pass
 
 class Dialogue(Base):
     __tablename__ = "dialogues"
@@ -62,8 +63,9 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
     """Create all tables"""
-    import os
-    os.makedirs(os.path.dirname(config.DATABASE_PATH), exist_ok=True)
+    db_dir = os.path.dirname(config.DATABASE_PATH)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
     Base.metadata.create_all(bind=engine)
 
 def get_db():

@@ -1,6 +1,7 @@
 import uuid
 import os
 from datetime import datetime
+from contextlib import asynccontextmanager
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
@@ -14,7 +15,18 @@ from ollama_client import ollama_client
 from comfyui_client import comfyui_client
 from utils import build_system_prompt, build_avatar_prompt, build_avatar_negative
 
-app = FastAPI(title="RP Novel Engine API", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    init_db()
+    print("✅ Database initialized")
+    print(f"🦙 Ollama: {config.OLLAMA_URL}")
+    print(f"🎨 ComfyUI: {config.COMFYUI_URL}")
+    yield
+    # Shutdown
+    print("👋 Shutting down...")
+
+app = FastAPI(title="RP Novel Engine API", version="1.0.0", lifespan=lifespan)
 
 # CORS для фронтенда
 app.add_middleware(
@@ -52,12 +64,7 @@ class RegenerateRequest(BaseModel):
 
 # ============ Эндпоинты ============
 
-@app.on_event("startup")
-async def startup():
-    init_db()
-    print("✅ Database initialized")
-    print(f"🦙 Ollama: {config.OLLAMA_URL}")
-    print(f"🎨 ComfyUI: {config.COMFYUI_URL}")
+
 
 @app.get("/health")
 async def health_check():
