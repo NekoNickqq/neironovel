@@ -1,0 +1,81 @@
+{
+  "5": {
+    "inputs": {
+      "width": 1280,
+      "height": 720,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage"
+  },
+  "18": {
+    "inputs": {
+      "ckpt_name": "novaFurryXL_ilV170.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple"
+  },
+  "20": {
+    "inputs": {
+      "text": "ugly, blurry, low quality, deformed, bad anatomy, bad hands, extra fingers, mutated, disfigured, worst quality, low resolution, badly drawn, watermark, text, signature, cropped, jpeg artifacts, sketch",
+      "clip": ["41", 1]
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "21": {
+    "inputs": {
+      "text": "",
+      "clip": ["41", 1]
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "24": {
+    "inputs": {
+      "model_name": "RealESRGAN_x2plus.pth"
+    },
+    "class_type": "UpscaleModelLoader"
+  },
+  "25": {
+    "inputs": {
+      "upscale_model": ["24", 0],
+      "image": ["32", 0]
+    },
+    "class_type": "ImageUpscaleWithModel"
+  },
+  "32": {
+    "inputs": {
+      "samples": ["99", 0],
+      "vae": ["18", 2]
+    },
+    "class_type": "VAEDecode"
+  },
+  "33": {
+    "inputs": {
+      "images": ["25", 0]
+    },
+    "class_type": "PreviewImage"
+  },
+  "41": {
+    "inputs": {
+      "lora_name": "add-detail-xl.safetensors",
+      "strength_model": 1,
+      "strength_clip": 0.9,
+      "model": ["18", 0],
+      "clip": ["18", 1]
+    },
+    "class_type": "LoraLoader"
+  },
+  "99": {
+    "inputs": {
+      "seed": 0,
+      "steps": 35,
+      "cfg": 6,
+      "sampler_name": "euler_ancestral",
+      "scheduler": "karras",
+      "denoise": 1,
+      "model": ["41", 0],
+      "positive": ["21", 0],
+      "negative": ["20", 0],
+      "latent_image": ["5", 0]
+    },
+    "class_type": "KSampler"
+  }
+}
