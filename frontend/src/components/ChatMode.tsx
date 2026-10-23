@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, KeyboardEvent } from 'react';
 import { useApp } from '../store';
 import { ArrowLeft, ImagePlus, RefreshCw, ChevronLeft, ChevronRight, BookOpen } from 'lucide-react';
 import { Message, TextBlock } from '../types';
+import { SceneImage } from './SceneImage';
 
 function MessageBlock({ block, isFirst }: { block: TextBlock; isFirst: boolean }) {
   const fontClass = block.speaker === 'narrator' ? 'font-narrator'
@@ -217,7 +218,7 @@ function ChatMessageItem({
 
           {currentImage && (
             <div className="mt-4">
-              <img
+              <SceneImage
                 src={currentImage}
                 alt="Scene"
                 className="rounded-xl w-full max-h-96 object-cover border border-gray-700/50"
@@ -232,7 +233,7 @@ function ChatMessageItem({
                         idx === message.selected_image_index ? 'border-purple-500 scale-110' : 'border-transparent opacity-60 hover:opacity-100'
                       }`}
                     >
-                      <img src={img} alt={`Variant ${idx + 1}`} className="w-full h-full object-cover" />
+                      <SceneImage src={img} alt={`Variant ${idx + 1}`} className="w-full h-full object-cover" />
                     </button>
                   ))}
                 </div>

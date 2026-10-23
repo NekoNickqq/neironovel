@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, KeyboardEvent } from 'react';
 import { useApp } from '../store';
 import { RefreshCw, Eye, EyeOff, ImagePlus, MessageSquare } from 'lucide-react';
 import { TextBlock } from '../types';
+import { SceneImage } from './SceneImage';
 
 export function VisualNovelMode() {
   const { state, dispatch, currentDialogue, sendMessage, regenerateText, regenerateImage } = useApp();
@@ -147,7 +148,7 @@ export function VisualNovelMode() {
       {/* Background image */}
       {backgroundImage && (
         <div className="absolute inset-0">
-          <img
+          <SceneImage
             src={backgroundImage}
             alt="Scene background"
             className="w-full h-full object-cover transition-opacity duration-1000"

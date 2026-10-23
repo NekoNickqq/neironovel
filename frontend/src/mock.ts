@@ -1,15 +1,5 @@
 import { Dialogue, Message, TextBlock, CharacterCard, DialogueSettings } from './types';
-
-const DEMO_IMAGES = [
-  'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1280&h=720&fit=crop',
-  'https://images.unsplash.com/photo-1440404653325-ab127d49abc1?w=1280&h=720&fit=crop',
-  'https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?w=1280&h=720&fit=crop',
-  'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=1280&h=720&fit=crop',
-  'https://images.unsplash.com/photo-1507400492013-162706c8c05e?w=1280&h=720&fit=crop',
-  'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=1280&h=720&fit=crop',
-  'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=1280&h=720&fit=crop',
-  'https://images.unsplash.com/photo-1504198266287-1659872e6590?w=1280&h=720&fit=crop',
-];
+import { DEMO_IMAGES, getRandomDemoImage } from './demoImages';
 
 export function createMockDialogue(): Dialogue {
   const dialogueId = 'dialogue-1';
@@ -176,5 +166,5 @@ export function generateAIResponse(): { blocks: TextBlock[]; image_prompt: strin
 }
 
 export function getRandomImage(): string {
-  return DEMO_IMAGES[Math.floor(Math.random() * DEMO_IMAGES.length)];
+  return getRandomDemoImage();
 }
