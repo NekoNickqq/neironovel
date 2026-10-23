@@ -35,7 +35,7 @@ function MessageBlock({ block, isFirst }: { block: TextBlock; isFirst: boolean }
 
 
 export function ChatMode() {
-  const { state, dispatch, currentDialogue, sendMessage, regenerateText, regenerateImage } = useApp();
+  const { state, dispatch, currentDialogue, sendMessage, regenerateText, regenerateImage, selectImage, selectTextVersion } = useApp();
   const [inputText, setInputText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -109,8 +109,8 @@ export function ChatMode() {
               isLast={idx === currentDialogue.messages.length - 1}
               onRegenerateText={regenerateText}
               onRegenerateImage={regenerateImage}
-              onSelectImage={(messageId, index) => dispatch({ type: 'SELECT_IMAGE', payload: { messageId, index } })}
-              onSelectVersion={(messageId, index) => dispatch({ type: 'SELECT_TEXT_VERSION', payload: { messageId, index } })}
+              onSelectImage={(messageId, index) => void selectImage(messageId, index)}
+              onSelectVersion={(messageId, index) => void selectTextVersion(messageId, index)}
             />
           ))}
           

@@ -2,7 +2,7 @@ import { useApp } from '../store';
 import { Plus, MessageSquare, Trash2, Sparkles, BookOpen, Image } from 'lucide-react';
 
 export function DialogueList() {
-  const { state, dispatch } = useApp();
+  const { state, dispatch, openDialogue, deleteDialogue } = useApp();
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950 p-8">
@@ -56,7 +56,9 @@ export function DialogueList() {
         </div>
 
         {/* Dialogue Cards */}
-        {state.dialogues.length === 0 ? (
+        {state.isLoadingList ? (
+          <div className="text-center py-20 text-gray-400">Загрузка диалогов…</div>
+        ) : state.dialogues.length === 0 ? (
           <div className="text-center py-20">
             <div className="text-6xl mb-4">📖</div>
             <p className="text-gray-400 text-lg">Нет диалогов. Создай первый!</p>
@@ -68,8 +70,9 @@ export function DialogueList() {
                 key={dialogue.id}
                 className="group bg-surface/50 backdrop-blur border border-purple-900/30 rounded-2xl p-6 hover:border-purple-600/50 transition-all cursor-pointer hover:shadow-lg hover:shadow-purple-900/20"
                 onClick={() => {
-                  dispatch({ type: 'SELECT_DIALOGUE', payload: dialogue.id });
-                  dispatch({ type: 'SET_VIEW', payload: 'chat' });
+                  void openDialogue(dialogue.id).then(() => {
+                    dispatch({ type: 'SET_VIEW', payload: 'chat' });
+                  });
                 }}
               >
                 <div className="flex items-start justify-between">
@@ -80,7 +83,7 @@ export function DialogueList() {
                     </div>
                     <p className="text-gray-400 text-sm mb-3">{dialogue.description}</p>
                     <div className="flex items-center gap-4 text-xs text-gray-500">
-                      <span>{dialogue.messages.length} сообщений</span>
+                      <span>{dialogue.messages.length || dialogue.message_count || 0} сообщений</span>
                       <span>{dialogue.settings.character_cards.length} персонажей</span>
                       <span>Стиль: {dialogue.settings.style_preset.split(',')[0]}</span>
                     </div>
@@ -89,7 +92,7 @@ export function DialogueList() {
                     onClick={(e) => {
                       e.stopPropagation();
                       if (confirm('Удалить диалог?')) {
-                        dispatch({ type: 'DELETE_DIALOGUE', payload: dialogue.id });
+                        void deleteDialogue(dialogue.id);
                       }
                     }}
                     className="opacity-0 group-hover:opacity-100 p-2 text-red-400 hover:text-red-300 hover:bg-red-900/20 rounded-lg transition-all"

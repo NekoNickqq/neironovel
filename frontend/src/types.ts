@@ -46,6 +46,8 @@ export interface Dialogue {
   settings: DialogueSettings;
   messages: Message[];
   created_at: string;
+  /** Заполнено в списке с API, пока сообщения не подгружены */
+  message_count?: number;
 }
 
 export type AppView = 'list' | 'create' | 'chat' | 'novel';

@@ -11,5 +11,14 @@ export default defineConfig({
     hmr: {
       port: 3000,
     },
+    proxy: {
+      "/api": {
+        target: "http://127.0.0.1:8000",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ""),
+      },
+      "/gallery": { target: "http://127.0.0.1:8000", changeOrigin: true },
+      "/avatars": { target: "http://127.0.0.1:8000", changeOrigin: true },
+    },
   },
 });

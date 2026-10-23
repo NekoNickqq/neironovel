@@ -1,80 +1,76 @@
-import React, { createContext, useContext, useReducer, ReactNode } from 'react';
-import { Dialogue, Message, TextBlock, AppView, CharacterCard } from './types';
-import { createMockDialogue, generateAIResponse, getRandomImage } from './mock';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useReducer,
+  ReactNode,
+} from 'react';
+import { Dialogue, Message, TextBlock, AppView } from './types';
+import { api, ApiError } from './api';
 
 interface AppState {
   dialogues: Dialogue[];
   currentDialogueId: string | null;
   currentView: AppView;
   isGenerating: boolean;
+  isLoadingList: boolean;
   novelModeHidden: boolean;
+  apiError: string | null;
+  services: { ollama: boolean; comfyui: boolean } | null;
 }
 
 type Action =
   | { type: 'SET_VIEW'; payload: AppView }
-  | { type: 'CREATE_DIALOGUE'; payload: Dialogue }
+  | { type: 'SET_DIALOGUES'; payload: Dialogue[] }
+  | { type: 'UPSERT_DIALOGUE'; payload: Dialogue }
   | { type: 'SELECT_DIALOGUE'; payload: string }
-  | { type: 'ADD_USER_MESSAGE'; payload: { dialogueId: string; text: string } }
-  | { type: 'ADD_ASSISTANT_MESSAGE'; payload: { dialogueId: string; message: Message } }
   | { type: 'SET_GENERATING'; payload: boolean }
+  | { type: 'SET_LOADING_LIST'; payload: boolean }
+  | { type: 'SET_API_ERROR'; payload: string | null }
+  | { type: 'SET_SERVICES'; payload: { ollama: boolean; comfyui: boolean } | null }
   | { type: 'TOGGLE_NOVEL_HIDDEN' }
   | { type: 'SELECT_IMAGE'; payload: { messageId: string; index: number } }
   | { type: 'SELECT_TEXT_VERSION'; payload: { messageId: string; index: number } }
-  | { type: 'ADD_IMAGE_VARIANT'; payload: { messageId: string; imagePath: string } }
-  | { type: 'ADD_TEXT_VERSION'; payload: { messageId: string; blocks: TextBlock[] } }
   | { type: 'DELETE_DIALOGUE'; payload: string };
 
-const initialDialogue = createMockDialogue();
-
 const initialState: AppState = {
-  dialogues: [initialDialogue],
+  dialogues: [],
   currentDialogueId: null,
   currentView: 'list',
   isGenerating: false,
+  isLoadingList: true,
   novelModeHidden: false,
+  apiError: null,
+  services: null,
 };
+
+function upsertDialogueList(dialogues: Dialogue[], dialogue: Dialogue): Dialogue[] {
+  const idx = dialogues.findIndex(d => d.id === dialogue.id);
+  if (idx === -1) return [...dialogues, dialogue];
+  const next = [...dialogues];
+  next[idx] = dialogue;
+  return next;
+}
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'SET_VIEW':
       return { ...state, currentView: action.payload };
-    case 'CREATE_DIALOGUE':
-      return { ...state, dialogues: [...state.dialogues, action.payload], currentDialogueId: action.payload.id };
+    case 'SET_DIALOGUES':
+      return { ...state, dialogues: action.payload };
+    case 'UPSERT_DIALOGUE':
+      return { ...state, dialogues: upsertDialogueList(state.dialogues, action.payload) };
     case 'SELECT_DIALOGUE':
       return { ...state, currentDialogueId: action.payload };
-    case 'ADD_USER_MESSAGE': {
-      const dialogues = state.dialogues.map(d => {
-        if (d.id !== action.payload.dialogueId) return d;
-        const messages = d.messages.map(m => ({ ...m }));
-        const lastMsg = messages[messages.length - 1];
-        const newMsg: Message = {
-          id: `msg-${Date.now()}`,
-          dialogue_id: d.id,
-          role: 'user',
-          blocks: [{ speaker: 'user', text: action.payload.text }],
-          image_path: null,
-          image_variants: [],
-          selected_image_index: 0,
-          has_image: false,
-          text_versions: [],
-          selected_version_index: 0,
-          parent_id: lastMsg?.id || null,
-          created_at: new Date().toISOString(),
-        };
-        return { ...d, messages: [...messages, newMsg] };
-      });
-      return { ...state, dialogues };
-    }
-    case 'ADD_ASSISTANT_MESSAGE': {
-      const dialogues = state.dialogues.map(d => {
-        if (d.id !== action.payload.dialogueId) return d;
-        const messages = d.messages.map(m => ({ ...m }));
-        return { ...d, messages: [...messages, action.payload.message] };
-      });
-      return { ...state, dialogues };
-    }
     case 'SET_GENERATING':
       return { ...state, isGenerating: action.payload };
+    case 'SET_LOADING_LIST':
+      return { ...state, isLoadingList: action.payload };
+    case 'SET_API_ERROR':
+      return { ...state, apiError: action.payload };
+    case 'SET_SERVICES':
+      return { ...state, services: action.payload };
     case 'TOGGLE_NOVEL_HIDDEN':
       return { ...state, novelModeHidden: !state.novelModeHidden };
     case 'SELECT_IMAGE': {
@@ -83,7 +79,7 @@ function reducer(state: AppState, action: Action): AppState {
         messages: d.messages.map(m =>
           m.id === action.payload.messageId
             ? { ...m, selected_image_index: action.payload.index }
-            : m
+            : m,
         ),
       }));
       return { ...state, dialogues };
@@ -94,36 +90,15 @@ function reducer(state: AppState, action: Action): AppState {
         messages: d.messages.map(m =>
           m.id === action.payload.messageId
             ? { ...m, selected_version_index: action.payload.index }
-            : m
-        ),
-      }));
-      return { ...state, dialogues };
-    }
-    case 'ADD_IMAGE_VARIANT': {
-      const dialogues = state.dialogues.map(d => ({
-        ...d,
-        messages: d.messages.map(m =>
-          m.id === action.payload.messageId
-            ? { ...m, image_variants: [...m.image_variants, action.payload.imagePath], selected_image_index: m.image_variants.length }
-            : m
-        ),
-      }));
-      return { ...state, dialogues };
-    }
-    case 'ADD_TEXT_VERSION': {
-      const dialogues = state.dialogues.map(d => ({
-        ...d,
-        messages: d.messages.map(m =>
-          m.id === action.payload.messageId
-            ? { ...m, text_versions: [...m.text_versions, action.payload.blocks], selected_version_index: m.text_versions.length }
-            : m
+            : m,
         ),
       }));
       return { ...state, dialogues };
     }
     case 'DELETE_DIALOGUE': {
       const dialogues = state.dialogues.filter(d => d.id !== action.payload);
-      const currentDialogueId = state.currentDialogueId === action.payload ? null : state.currentDialogueId;
+      const currentDialogueId =
+        state.currentDialogueId === action.payload ? null : state.currentDialogueId;
       return { ...state, dialogues, currentDialogueId };
     }
     default:
@@ -131,13 +106,32 @@ function reducer(state: AppState, action: Action): AppState {
   }
 }
 
+function formatApiError(err: unknown): string {
+  if (err instanceof ApiError) return err.message;
+  if (err instanceof Error) return err.message;
+  return 'Неизвестная ошибка API';
+}
+
 interface AppContextType {
   state: AppState;
   dispatch: React.Dispatch<Action>;
   currentDialogue: Dialogue | null;
+  refreshDialogueList: () => Promise<void>;
+  openDialogue: (id: string) => Promise<void>;
+  createDialogue: (payload: {
+    title: string;
+    description: string;
+    world_lore: string;
+    character_cards: Dialogue['settings']['character_cards'];
+    style_preset: string;
+    ai_controls_user: boolean;
+  }) => Promise<void>;
+  deleteDialogue: (id: string) => Promise<void>;
   sendMessage: (text: string, generateImage: boolean) => Promise<void>;
   regenerateText: (messageId: string) => Promise<void>;
   regenerateImage: (messageId: string) => Promise<void>;
+  selectImage: (messageId: string, index: number) => Promise<void>;
+  selectTextVersion: (messageId: string, index: number) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -145,59 +139,185 @@ const AppContext = createContext<AppContextType | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  const currentDialogue = state.dialogues.find(d => d.id === state.currentDialogueId) || null;
+  const currentDialogue =
+    state.dialogues.find(d => d.id === state.currentDialogueId) ?? null;
 
-  const sendMessage = async (text: string, generateImage: boolean) => {
-    if (!currentDialogue) return;
+  const refreshDialogueList = useCallback(async () => {
+    dispatch({ type: 'SET_LOADING_LIST', payload: true });
+    try {
+      const list = await api.listDialogues();
+      dispatch({ type: 'SET_DIALOGUES', payload: list });
+      dispatch({ type: 'SET_API_ERROR', payload: null });
+    } catch (err) {
+      dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
+    } finally {
+      dispatch({ type: 'SET_LOADING_LIST', payload: false });
+    }
+  }, []);
 
-    dispatch({ type: 'ADD_USER_MESSAGE', payload: { dialogueId: currentDialogue.id, text } });
-    dispatch({ type: 'SET_GENERATING', payload: true });
+  const refreshHealth = useCallback(async () => {
+    try {
+      const health = await api.health();
+      dispatch({ type: 'SET_SERVICES', payload: health.services });
+    } catch {
+      dispatch({ type: 'SET_SERVICES', payload: null });
+    }
+  }, []);
 
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 1500 + Math.random() * 1500));
+  useEffect(() => {
+    void refreshDialogueList();
+    void refreshHealth();
+  }, [refreshDialogueList, refreshHealth]);
 
-    const aiResponse = generateAIResponse();
-    const imagePath = generateImage ? getRandomImage() : null;
+  const openDialogue = useCallback(async (id: string) => {
+    try {
+      const dialogue = await api.getDialogue(id);
+      dispatch({ type: 'UPSERT_DIALOGUE', payload: dialogue });
+      dispatch({ type: 'SELECT_DIALOGUE', payload: id });
+      dispatch({ type: 'SET_API_ERROR', payload: null });
+    } catch (err) {
+      dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
+      throw err;
+    }
+  }, []);
 
-    const assistantMessage: Message = {
-      id: `msg-${Date.now()}`,
-      dialogue_id: currentDialogue.id,
-      role: 'assistant',
-      blocks: aiResponse.blocks,
-      image_path: imagePath,
-      image_variants: imagePath ? [imagePath] : [],
-      selected_image_index: 0,
-      has_image: !!imagePath,
-      text_versions: [],
-      selected_version_index: 0,
-      parent_id: `msg-${Date.now() - 1}`,
-      created_at: new Date().toISOString(),
-    };
+  const createDialogue = useCallback(
+    async (payload: {
+      title: string;
+      description: string;
+      world_lore: string;
+      character_cards: Dialogue['settings']['character_cards'];
+      style_preset: string;
+      ai_controls_user: boolean;
+    }) => {
+      const lore = payload.world_lore.trim()
+        ? payload.world_lore
+        : payload.description;
+      try {
+        const dialogue = await api.createDialogue({
+          title: payload.title,
+          description: payload.description,
+          world_lore: lore,
+          character_cards: payload.character_cards,
+          style_preset: payload.style_preset,
+          ai_controls_user: payload.ai_controls_user,
+        });
+        dispatch({ type: 'UPSERT_DIALOGUE', payload: dialogue });
+        dispatch({ type: 'SELECT_DIALOGUE', payload: dialogue.id });
+        dispatch({ type: 'SET_VIEW', payload: 'chat' });
+        dispatch({ type: 'SET_API_ERROR', payload: null });
+      } catch (err) {
+        dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
+        throw err;
+      }
+    },
+    [],
+  );
 
-    dispatch({ type: 'ADD_ASSISTANT_MESSAGE', payload: { dialogueId: currentDialogue.id, message: assistantMessage } });
-    dispatch({ type: 'SET_GENERATING', payload: false });
-  };
+  const deleteDialogue = useCallback(async (id: string) => {
+    try {
+      await api.deleteDialogue(id);
+      dispatch({ type: 'DELETE_DIALOGUE', payload: id });
+      dispatch({ type: 'SET_API_ERROR', payload: null });
+    } catch (err) {
+      dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
+    }
+  }, []);
 
-  const regenerateText = async (messageId: string) => {
-    dispatch({ type: 'SET_GENERATING', payload: true });
-    await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
+  const reloadCurrentDialogue = useCallback(async () => {
+    if (!state.currentDialogueId) return;
+    const dialogue = await api.getDialogue(state.currentDialogueId);
+    dispatch({ type: 'UPSERT_DIALOGUE', payload: dialogue });
+  }, [state.currentDialogueId]);
 
-    const aiResponse = generateAIResponse();
-    dispatch({ type: 'ADD_TEXT_VERSION', payload: { messageId, blocks: aiResponse.blocks } });
-    dispatch({ type: 'SET_GENERATING', payload: false });
-  };
+  const sendMessage = useCallback(
+    async (text: string, generateImage: boolean) => {
+      if (!state.currentDialogueId) return;
+      dispatch({ type: 'SET_GENERATING', payload: true });
+      dispatch({ type: 'SET_API_ERROR', payload: null });
+      try {
+        await api.sendMessage(state.currentDialogueId, text, generateImage);
+        await reloadCurrentDialogue();
+      } catch (err) {
+        dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
+      } finally {
+        dispatch({ type: 'SET_GENERATING', payload: false });
+      }
+    },
+    [state.currentDialogueId, reloadCurrentDialogue],
+  );
 
-  const regenerateImage = async (messageId: string) => {
-    dispatch({ type: 'SET_GENERATING', payload: true });
-    await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 1500));
+  const regenerateText = useCallback(
+    async (messageId: string) => {
+      if (!state.currentDialogueId) return;
+      dispatch({ type: 'SET_GENERATING', payload: true });
+      dispatch({ type: 'SET_API_ERROR', payload: null });
+      try {
+        await api.regenerateText(state.currentDialogueId, messageId);
+        await reloadCurrentDialogue();
+      } catch (err) {
+        dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
+      } finally {
+        dispatch({ type: 'SET_GENERATING', payload: false });
+      }
+    },
+    [state.currentDialogueId, reloadCurrentDialogue],
+  );
 
-    const newImage = getRandomImage();
-    dispatch({ type: 'ADD_IMAGE_VARIANT', payload: { messageId, imagePath: newImage } });
-    dispatch({ type: 'SET_GENERATING', payload: false });
-  };
+  const regenerateImage = useCallback(
+    async (messageId: string) => {
+      if (!state.currentDialogueId) return;
+      dispatch({ type: 'SET_GENERATING', payload: true });
+      dispatch({ type: 'SET_API_ERROR', payload: null });
+      try {
+        await api.regenerateImage(state.currentDialogueId, messageId);
+        await reloadCurrentDialogue();
+      } catch (err) {
+        dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
+      } finally {
+        dispatch({ type: 'SET_GENERATING', payload: false });
+      }
+    },
+    [state.currentDialogueId, reloadCurrentDialogue],
+  );
+
+  const selectImage = useCallback(async (messageId: string, index: number) => {
+    dispatch({ type: 'SELECT_IMAGE', payload: { messageId, index } });
+    try {
+      await api.selectImage(messageId, index);
+    } catch (err) {
+      dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
+      await reloadCurrentDialogue();
+    }
+  }, [reloadCurrentDialogue]);
+
+  const selectTextVersion = useCallback(async (messageId: string, index: number) => {
+    dispatch({ type: 'SELECT_TEXT_VERSION', payload: { messageId, index } });
+    try {
+      await api.selectVersion(messageId, index);
+    } catch (err) {
+      dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
+      await reloadCurrentDialogue();
+    }
+  }, [reloadCurrentDialogue]);
 
   return (
-    <AppContext.Provider value={{ state, dispatch, currentDialogue, sendMessage, regenerateText, regenerateImage }}>
+    <AppContext.Provider
+      value={{
+        state,
+        dispatch,
+        currentDialogue,
+        refreshDialogueList,
+        openDialogue,
+        createDialogue,
+        deleteDialogue,
+        sendMessage,
+        regenerateText,
+        regenerateImage,
+        selectImage,
+        selectTextVersion,
+      }}
+    >
       {children}
     </AppContext.Provider>
   );

@@ -3,6 +3,7 @@ import { DialogueList } from './components/DialogueList';
 import { CreateDialogue } from './components/CreateDialogue';
 import { ChatMode } from './components/ChatMode';
 import { VisualNovelMode } from './components/VisualNovelMode';
+import { ApiStatusBar } from './components/ApiStatusBar';
 
 function AppContent() {
   const { state } = useApp();
@@ -25,6 +26,7 @@ export default function App() {
   return (
     <AppProvider>
       <AppContent />
+      <ApiStatusBar />
     </AppProvider>
   );
 }

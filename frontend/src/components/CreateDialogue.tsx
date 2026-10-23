@@ -5,7 +5,7 @@ import { CharacterCard } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 export function CreateDialogue() {
-  const { dispatch } = useApp();
+  const { dispatch, createDialogue } = useApp();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [worldLore, setWorldLore] = useState('');
@@ -14,6 +14,7 @@ export function CreateDialogue() {
   const [newCharName, setNewCharName] = useState('');
   const [newCharDesc, setNewCharDesc] = useState('');
   const [aiControlsUser, setAiControlsUser] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const STYLE_PRESETS = [
     { name: 'Тёмное фэнтези', value: 'dark fantasy, cinematic lighting, masterpiece, best quality, 8k, dramatic shadows' },
@@ -41,37 +42,28 @@ export function CreateDialogue() {
     setCharacters(characters.filter(c => c.id !== id));
   };
 
-  const handleCreate = () => {
-    if (!title.trim()) return;
-
-    const dialogue = {
-      id: uuidv4(),
-      title,
-      description,
-      settings: {
+  const handleCreate = async () => {
+    if (!title.trim() || submitting) return;
+    setSubmitting(true);
+    try {
+      await createDialogue({
+        title,
+        description,
         world_lore: worldLore,
         character_cards: characters,
         style_preset: stylePreset,
-        font_config: {
-          narrator: 'Cinzel, Georgia, serif',
-          user: 'Inter, sans-serif',
-          hero: 'Roboto, sans-serif',
-          sidekick: 'Open Sans, sans-serif',
-        },
         ai_controls_user: aiControlsUser,
-      },
-      messages: [],
-      created_at: new Date().toISOString(),
-    };
-
-    dispatch({ type: 'CREATE_DIALOGUE', payload: dialogue });
-    dispatch({ type: 'SET_VIEW', payload: 'chat' });
+      });
+    } catch {
+      /* ошибка в store.apiError */
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-950 to-gray-900 p-8">
       <div className="max-w-3xl mx-auto">
-        {/* Back button */}
         <button
           onClick={() => dispatch({ type: 'SET_VIEW', payload: 'list' })}
           className="flex items-center gap-2 text-gray-400 hover:text-white mb-8 transition-colors"
@@ -86,7 +78,6 @@ export function CreateDialogue() {
         </h2>
 
         <div className="space-y-8">
-          {/* Basic Info */}
           <div className="bg-surface/50 backdrop-blur border border-purple-900/30 rounded-2xl p-6">
             <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
               <BookOpen size={20} className="text-purple-400" />
@@ -116,7 +107,6 @@ export function CreateDialogue() {
             </div>
           </div>
 
-          {/* World Lore */}
           <div className="bg-surface/50 backdrop-blur border border-purple-900/30 rounded-2xl p-6">
             <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
               🌍 Лор мира
@@ -124,13 +114,12 @@ export function CreateDialogue() {
             <textarea
               value={worldLore}
               onChange={e => setWorldLore(e.target.value)}
-              placeholder="Опиши мир, в котором происходит действие. История, правила магии, ключевые локации, фракции..."
+              placeholder="Опиши мир, в котором происходит действие..."
               rows={6}
               className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none transition-colors resize-none"
             />
           </div>
 
-          {/* Style Preset */}
           <div className="bg-surface/50 backdrop-blur border border-purple-900/30 rounded-2xl p-6">
             <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
               <Palette size={20} className="text-purple-400" />
@@ -159,15 +148,12 @@ export function CreateDialogue() {
             />
           </div>
 
-          {/* Characters */}
           <div className="bg-surface/50 backdrop-blur border border-purple-900/30 rounded-2xl p-6">
             <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
               👥 Персонажи
             </h3>
-            
-            {/* Existing characters */}
             <div className="space-y-3 mb-4">
-              {characters.map((char, idx) => (
+              {characters.map(char => (
                 <div key={char.id} className="flex items-center gap-3 p-3 bg-gray-900/50 rounded-xl">
                   <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm" style={{ backgroundColor: char.color }}>
                     {char.name[0]}
@@ -185,8 +171,6 @@ export function CreateDialogue() {
                 </div>
               ))}
             </div>
-
-            {/* Add character */}
             <div className="border border-dashed border-gray-700 rounded-xl p-4 space-y-3">
               <input
                 type="text"
@@ -199,7 +183,7 @@ export function CreateDialogue() {
                 type="text"
                 value={newCharDesc}
                 onChange={e => setNewCharDesc(e.target.value)}
-                placeholder="Описание (внешность, характер, роль)"
+                placeholder="Описание"
                 className="w-full px-4 py-2 bg-gray-900/50 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none transition-colors"
               />
               <button
@@ -212,7 +196,6 @@ export function CreateDialogue() {
             </div>
           </div>
 
-          {/* AI Settings */}
           <div className="bg-surface/50 backdrop-blur border border-purple-900/30 rounded-2xl p-6">
             <h3 className="text-lg font-semibold text-white mb-4">⚙️ Настройки ИИ</h3>
             <label className="flex items-center gap-3 cursor-pointer">
@@ -229,13 +212,12 @@ export function CreateDialogue() {
             </label>
           </div>
 
-          {/* Create button */}
           <button
-            onClick={handleCreate}
-            disabled={!title.trim()}
+            onClick={() => void handleCreate()}
+            disabled={!title.trim() || submitting}
             className="w-full py-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:from-gray-700 disabled:to-gray-700 rounded-xl text-white font-semibold text-lg transition-all hover:scale-[1.02] shadow-lg shadow-purple-600/20"
           >
-            ✨ Создать диалог
+            {submitting ? 'Создаём…' : '✨ Создать диалог'}
           </button>
         </div>
       </div>
