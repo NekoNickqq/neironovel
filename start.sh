@@ -7,7 +7,6 @@ cd "$ROOT"
 echo "🎭 RP Novel Engine — Запуск всех сервисов"
 echo "==========================================="
 
-# Проверка Ollama
 echo "🦙 Проверка Ollama..."
 if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
     echo "   ✅ Ollama работает"
@@ -15,7 +14,6 @@ else
     echo "   ⚠️  Ollama не отвечает. Запусти: ollama serve"
 fi
 
-# Проверка ComfyUI (URL по умолчанию из .env — при необходимости измени)
 COMFYUI_URL="${COMFYUI_URL:-http://192.168.1.107:1215}"
 echo "🎨 Проверка ComfyUI ($COMFYUI_URL)..."
 if curl -s "$COMFYUI_URL/system_stats" > /dev/null 2>&1; then
@@ -24,7 +22,6 @@ else
     echo "   ⚠️  ComfyUI не отвечает. Проверь COMFYUI_URL в backend/.env"
 fi
 
-# Запуск Backend
 echo "🐍 Запуск Backend..."
 cd "$ROOT/backend"
 if [ ! -d "venv" ]; then
@@ -37,14 +34,15 @@ python main.py &
 BACKEND_PID=$!
 cd "$ROOT"
 
-# Запуск Frontend
 echo "🎭 Запуск Frontend..."
+cd "$ROOT/frontend"
 if [ ! -d "node_modules" ]; then
-    echo "   ⚠️  node_modules не найден. Запусти: npm install"
+    echo "   ⚠️  node_modules не найден. Запусти: npm install (v papke frontend)"
     exit 1
 fi
 npm run dev &
 FRONTEND_PID=$!
+cd "$ROOT"
 
 echo ""
 echo "✅ Все сервисы запущены!"
@@ -53,7 +51,6 @@ echo "📍 Адреса:"
 echo "   Frontend: http://localhost:3000"
 echo "   Backend:  http://localhost:8000"
 echo "   API Docs: http://localhost:8000/docs"
-echo "   Ollama:   http://localhost:11434"
 echo ""
 echo "Нажми Ctrl+C для остановки backend и frontend"
 

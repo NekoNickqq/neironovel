@@ -87,14 +87,16 @@ mkdir -p data gallery avatars
 deactivate
 cd ..
 
+cd frontend
 npm ci
 npm run build
+cd ..
 ```
 
 Проверка сборки:
 
 ```bash
-ls -la dist/
+ls -la frontend/dist/
 ```
 
 ---
@@ -217,7 +219,7 @@ server {
     listen 80;
     server_name novel.example.com;
 
-    root /var/www/neironovel/dist;
+    root /var/www/neironovel/frontend/dist;
     index index.html;
 
     location / {
@@ -298,8 +300,10 @@ source backend/venv/bin/activate
 pip install -r backend/requirements.txt
 deactivate
 
+cd frontend
 npm ci
 npm run build
+cd ..
 
 sudo systemctl restart neironovel-api
 sudo systemctl reload nginx

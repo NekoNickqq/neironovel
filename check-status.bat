@@ -83,7 +83,7 @@ if %BACKEND_OK%==0 (
 if %FRONTEND_OK%==0 (
     echo.
     echo %YELLOW%💡 Чтобы запустить Frontend:%RESET%
-    echo %YELLOW%   1. В корне репозитория: npm install^&npm run dev%RESET%
+    echo %YELLOW%   1. cd frontend ^& npm install ^& npm run dev%RESET%
 )
 
 echo.

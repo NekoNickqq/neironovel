@@ -9,9 +9,9 @@
 | **UI + API** | Python 3.10+, Node.js 18+, установка зависимостей (см. ниже) | Открывается интерфейс на **http://localhost:3000**, API на **http://localhost:8000** |
 | **Полная генерация ИИ** | Дополнительно: Ollama с моделью, доступный ComfyUI, правка `backend/.env` | Текст и картинки через backend |
 
-В репозиторий **не** входят: `node_modules/`, `backend/venv/` — их ставят локально один раз.
+В репозиторий **не** входят: `frontend/node_modules/`, `backend/venv/` — их ставят локально один раз.
 
-> **Важно:** сейчас фронтенд в основном работает на **mock-данных** (`src/mock.ts`). Backend уже поднимается и отдаёт API, но UI ещё не полностью подключён к нему. Для просмотра интерфейса и разработки клонирования достаточно; для end-to-end через API — нужна доработка интеграции на фронте.
+> **Важно:** сейчас фронтенд в основном работает на **mock-данных** (`frontend/src/mock.ts`). Backend уже поднимается и отдаёт API, но UI ещё не полностью подключён к нему. Для просмотра интерфейса и разработки клонирования достаточно; для end-to-end через API — нужна доработка интеграции на фронте.
 
 ## Архитектура
 
@@ -32,21 +32,25 @@
 
 ```
 neironovel/
-├── src/                   # React (корень = frontend)
-├── package.json
-├── vite.config.js         # dev-сервер: порт 3000
-├── backend/
+├── frontend/              # React + Vite (порт 3000)
+│   ├── src/
+│   ├── package.json
+│   └── vite.config.js
+├── backend/               # FastAPI
 │   ├── main.py
-│   ├── .env               # конфиг (в репозитории; COMFYUI_URL правь под себя)
+│   ├── .env
 │   ├── requirements.txt
-│   ├── data/              # SQLite (создаётся при первом запуске)
+│   ├── data/
 │   ├── gallery/
 │   └── avatars/
-├── install-backend.bat    # Windows: venv + pip
-├── start.bat              # Windows: backend + frontend
+├── install-backend.bat
+├── install-frontend.bat
+├── start.bat
+├── launch-backend.bat
+├── launch-frontend.bat
 ├── check-status.bat
-├── start.sh               # Linux/macOS
-└── DEPLOY.md              # деплой на сервер
+├── start.sh
+└── DEPLOY.md
 ```
 
 ## Требования
@@ -78,10 +82,12 @@ mkdir data gallery avatars
 cd ..
 ```
 
-**Frontend** — в корне репозитория:
+**Frontend** — `install-frontend.bat` или:
 
 ```cmd
+cd frontend
 npm install
+cd ..
 ```
 
 ### 3. Настройка `backend/.env`
@@ -119,7 +125,8 @@ cd backend
 venv\Scripts\activate
 python main.py
 
-:: Терминал 2 — frontend (из корня репозитория)
+:: Терминал 2 — frontend
+cd frontend
 npm run dev
 ```
 
@@ -145,19 +152,21 @@ python main.py &
 cd ..
 
 # Frontend
+cd frontend
 npm install
 npm run dev
 ```
 
-Или из корня: `chmod +x start.sh && ./start.sh` (после `setup.sh` и `npm install`).
+Или из корня: `chmod +x start.sh && ./start.sh` (после `setup.sh` и `npm install` в `frontend/`).
 
 ## Сборка frontend для production
 
 ```bash
+cd frontend
 npm run build
 ```
 
-Артефакт: папка `dist/`. Раздача и связка с API — в [DEPLOY.md](DEPLOY.md).
+Артефакт: `frontend/dist/`. Раздача и связка с API — в [DEPLOY.md](DEPLOY.md).
 
 ## Документация
 
@@ -166,6 +175,10 @@ npm run build
 - Swagger (локально): http://localhost:8000/docs
 
 ## Troubleshooting
+
+### `start.bat` сразу закрывается
+
+Обнови репозиторий до последней версии. Старый скрипт падал из‑за ANSI-кодов `[0m` в `cmd`. Сейчас запуск идёт через `launch-backend.bat` и `launch-frontend.bat` — окна backend/frontend остаются открытыми. Если всё равно закрывается — сначала `install-backend.bat` и `install-frontend.bat`, затем снова `start.bat`.
 
 ### Backend падает при старте на Windows
 
