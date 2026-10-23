@@ -166,3 +166,6 @@ python main.py --listen 0.0.0.0 --port 1215
 ## 📝 Лицензия
 
 MIT
+# neironovel
+# neironovel
+# neironovel
