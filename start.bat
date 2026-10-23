@@ -77,9 +77,8 @@ echo.
 
 :: ========== ПРОВЕРКА FRONTEND ==========
 echo %BLUE%[5/6] Проверка Frontend...%RESET%
-if not exist "frontend\node_modules" (
+if not exist "node_modules" (
     echo %YELLOW%⚠️  node_modules не найден. Устанавливаю...%RESET%
-    cd frontend
     call npm install
     if errorlevel 1 (
         echo %RED%❌ Не удалось установить!%RESET%
@@ -88,7 +87,6 @@ if not exist "frontend\node_modules" (
         exit /b 1
     )
     echo %GREEN%✅ Установлено%RESET%
-    cd ..
 ) else (
     echo %GREEN%✅ node_modules существует%RESET%
 )
@@ -138,7 +136,7 @@ if %COMFYUI_OK%==1 (
 )
 
 echo %GREEN%✅ Backend:   http://localhost:8000%RESET%
-echo %GREEN%✅ Frontend:  http://localhost:5173%RESET%
+echo %GREEN%✅ Frontend:  http://localhost:3000%RESET%
 echo.
 
 if %OLLAMA_OK%==0 echo %YELLOW%⚠️  Без Ollama текст генерироваться не будет%RESET%
@@ -148,15 +146,13 @@ echo.
 :: ========== ЗАПУСК BACKEND ==========
 echo %BLUE%🚀 Запуск Backend...%RESET%
 cd backend
-start "🐍 RP Novel - Backend" cmd /k "call venv\Scripts\activate.bat && echo. && echo ✅ Backend запущен на http://localhost:8000 && echo 📖 API Docs: http://localhost:8000/docs && echo. && python main.py"
+start "🐍 RP Novel - Backend" cmd /k "cd /d \"%~dp0backend\" && call venv\Scripts\activate.bat && echo. && echo ✅ Backend запущен на http://localhost:8000 && echo 📖 API Docs: http://localhost:8000/docs && echo. && python main.py"
 cd ..
 timeout /t 3 /nobreak >nul
 
 :: ========== ЗАПУСК FRONTEND ==========
 echo %BLUE%🚀 Запуск Frontend...%RESET%
-cd frontend
-start "🎭 RP Novel - Frontend" cmd /k "echo. && echo ✅ Frontend запущен на http://localhost:5173 && echo. && npm run dev"
-cd ..
+start "🎭 RP Novel - Frontend" cmd /k "cd /d \"%~dp0\" && echo. && echo ✅ Frontend запущен на http://localhost:3000 && echo. && npm run dev"
 timeout /t 3 /nobreak >nul
 
 :: ========== ОТКРЫТИЕ БРАУЗЕРА ==========
@@ -164,13 +160,13 @@ echo.
 echo %GREEN%✅ Все сервисы запущены!%RESET%
 echo.
 echo %CYAN%📍 Адреса:%RESET%
-echo %CYAN%   Frontend:  http://localhost:5173%RESET%
+echo %CYAN%   Frontend:  http://localhost:3000%RESET%
 echo %CYAN%   Backend:   http://localhost:8000%RESET%
 echo %CYAN%   API Docs:  http://localhost:8000/docs%RESET%
 echo.
 echo %BLUE%🌐 Открываю браузер через 3 секунды...%RESET%
 timeout /t 3 /nobreak >nul
-start http://localhost:5173
+start http://localhost:3000
 
 echo.
 echo %GREEN%✅ Готово! Можешь закрыть это окно.%RESET%

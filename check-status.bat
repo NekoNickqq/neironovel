@@ -8,6 +8,8 @@ set "YELLOW=[93m"
 set "CYAN=[96m"
 set "RESET=[0m"
 
+cd /d "%~dp0"
+
 echo.
 echo %CYAN%🔍 Проверка статуса сервисов%RESET%
 echo %CYAN%==============================%RESET%
@@ -23,19 +25,19 @@ if errorlevel 1 (
     set OLLAMA_OK=1
 )
 
-:: ComfyUI
+:: ComfyUI (адрес из backend\.env — по умолчанию см. README)
 set COMFYUI_OK=0
 powershell -Command "try { $r = Invoke-WebRequest -Uri 'http://192.168.1.107:1215/system_stats' -TimeoutSec 3 -UseBasicParsing; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
 if errorlevel 1 (
-    echo %RED%❌ ComfyUI:   НЕ ДОСТУПЕН (192.168.1.107:1215)%RESET%
+    echo %RED%❌ ComfyUI:   НЕ ДОСТУПЕН (см. COMFYUI_URL в backend\.env)%RESET%
 ) else (
-    echo %GREEN%✅ ComfyUI:   РАБОТАЕТ (192.168.1.107:1215)%RESET%
+    echo %GREEN%✅ ComfyUI:   РАБОТАЕТ%RESET%
     set COMFYUI_OK=1
 )
 
 :: Backend
 set BACKEND_OK=0
-powershell -Command "try { $r = Invoke-WebRequest -Uri 'http://localhost:8000/health' -TimeoutSec 3 -UseBasicParsing; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+powershell -Command "try { $r = Invoke-WebRequest -Uri 'http://localhost:8000/docs' -TimeoutSec 5 -UseBasicParsing; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
 if errorlevel 1 (
     echo %RED%❌ Backend:   НЕ ЗАПУЩЕН (localhost:8000)%RESET%
 ) else (
@@ -45,11 +47,11 @@ if errorlevel 1 (
 
 :: Frontend
 set FRONTEND_OK=0
-powershell -Command "try { $r = Invoke-WebRequest -Uri 'http://localhost:5173' -TimeoutSec 3 -UseBasicParsing; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+powershell -Command "try { $r = Invoke-WebRequest -Uri 'http://localhost:3000' -TimeoutSec 3 -UseBasicParsing; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
 if errorlevel 1 (
-    echo %RED%❌ Frontend:  НЕ ЗАПУЩЕН (localhost:5173)%RESET%
+    echo %RED%❌ Frontend:  НЕ ЗАПУЩЕН (localhost:3000)%RESET%
 ) else (
-    echo %GREEN%✅ Frontend:  РАБОТАЕТ (localhost:5173)%RESET%
+    echo %GREEN%✅ Frontend:  РАБОТАЕТ (localhost:3000)%RESET%
     set FRONTEND_OK=1
 )
 
@@ -66,9 +68,8 @@ if %OLLAMA_OK%==0 (
 
 if %COMFYUI_OK%==0 (
     echo.
-    echo %YELLOW%💡 Чтобы запустить ComfyUI:%RESET%
-    echo %YELLOW%   1. Открой папку ComfyUI%RESET%
-    echo %YELLOW%   2. Запусти: python main.py --listen 0.0.0.0 --port 1215%RESET%
+    echo %YELLOW%💡 ComfyUI:%RESET%
+    echo %YELLOW%   Укажи свой URL в backend\.env (COMFYUI_URL) и запусти ComfyUI с --listen%RESET%
 )
 
 if %BACKEND_OK%==0 (
@@ -82,8 +83,7 @@ if %BACKEND_OK%==0 (
 if %FRONTEND_OK%==0 (
     echo.
     echo %YELLOW%💡 Чтобы запустить Frontend:%RESET%
-    echo %YELLOW%   1. cd frontend%RESET%
-    echo %YELLOW%   2. npm run dev%RESET%
+    echo %YELLOW%   1. В корне репозитория: npm install^&npm run dev%RESET%
 )
 
 echo.

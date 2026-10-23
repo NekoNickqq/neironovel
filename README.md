@@ -1,171 +1,195 @@
-# 🎭 RP Novel Engine
+# RP Novel Engine (neironovel)
 
-Интерактивный движок для создания визуальных новелл с ИИ-генерацией текста и изображений.
+Интерактивный движок для визуальных новелл с генерацией текста (Ollama) и изображений (ComfyUI).
 
-## 🏗️ Архитектура
+## Что получит коллега после `git clone`
+
+| Уровень | Что нужно | Результат |
+|--------|-----------|-----------|
+| **UI + API** | Python 3.10+, Node.js 18+, установка зависимостей (см. ниже) | Открывается интерфейс на **http://localhost:3000**, API на **http://localhost:8000** |
+| **Полная генерация ИИ** | Дополнительно: Ollama с моделью, доступный ComfyUI, правка `backend/.env` | Текст и картинки через backend |
+
+В репозиторий **не** входят: `node_modules/`, `backend/venv/` — их ставят локально один раз.
+
+> **Важно:** сейчас фронтенд в основном работает на **mock-данных** (`src/mock.ts`). Backend уже поднимается и отдаёт API, но UI ещё не полностью подключён к нему. Для просмотра интерфейса и разработки клонирования достаточно; для end-to-end через API — нужна доработка интеграции на фронте.
+
+## Архитектура
 
 ```
 ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
 │  Frontend   │─────▶│  Backend    │─────▶│   Ollama    │
-│  (React)    │      │  (FastAPI)  │      │  (Gemma 4)  │
+│  React/Vite │      │  FastAPI    │      │  (LLM)      │
 └─────────────┘      └──────┬──────┘      └─────────────┘
                             │
                             ▼
                      ┌─────────────┐
                      │  ComfyUI    │
-                     │ (Stable     │
-                     │  Diffusion) │
+                     │ (SD / SDXL) │
                      └─────────────┘
 ```
 
-## 📁 Структура проекта
+## Структура проекта
 
 ```
-rp-novel-engine/
-├── frontend/              # React приложение
-│   ├── src/
-│   │   ├── components/    # UI компоненты
-│   │   ├── store.tsx      # Состояние приложения
-│   │   └── types.ts       # TypeScript типы
-│   └── package.json
-│
-├── backend/               # Python API
-│   ├── main.py            # FastAPI endpoints
-│   ├── database.py        # SQLAlchemy модели
-│   ├── ollama_client.py   # Ollama интеграция
-│   ├── comfyui_client.py  # ComfyUI интеграция
-│   ├── workflow.json      # ComfyUI workflow
-│   └── requirements.txt
-│
-└── start.sh               # Запуск всех сервисов
+neironovel/
+├── src/                   # React (корень = frontend)
+├── package.json
+├── vite.config.js         # dev-сервер: порт 3000
+├── backend/
+│   ├── main.py
+│   ├── .env               # конфиг (в репозитории; COMFYUI_URL правь под себя)
+│   ├── requirements.txt
+│   ├── data/              # SQLite (создаётся при первом запуске)
+│   ├── gallery/
+│   └── avatars/
+├── install-backend.bat    # Windows: venv + pip
+├── start.bat              # Windows: backend + frontend
+├── check-status.bat
+├── start.sh               # Linux/macOS
+└── DEPLOY.md              # деплой на сервер
 ```
 
-## 🚀 Быстрый старт (Windows)
+## Требования
 
-### 1. Установка (один раз)
+- **Python** 3.10+ (проверено на 3.12)
+- **Node.js** 18+ и npm
+- **Ollama** — для генерации текста ([ollama.com](https://ollama.com))
+- **ComfyUI** — для генерации изображений (отдельная установка, часто на машине с GPU)
 
-**Двойной клик по `install-backend.bat`**
+## Локальный запуск (Windows)
 
-Или вручную:
+### 1. Клонирование
+
+```cmd
+git clone <url-репозитория> neironovel
+cd neironovel
+```
+
+### 2. Установка (один раз)
+
+**Backend** — двойной клик по `install-backend.bat` или:
+
 ```cmd
 cd backend
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
+mkdir data gallery avatars
+cd ..
 ```
 
-### 2. Настройка
+**Frontend** — в корне репозитория:
 
-Отредактируй `backend/.env`:
+```cmd
+npm install
+```
+
+### 3. Настройка `backend/.env`
+
+После клона открой `backend/.env` и укажи **свой** адрес ComfyUI (в репозитории может быть чужой IP):
+
 ```env
 OLLAMA_URL=http://localhost:11434
 OLLAMA_MODEL=huihui_ai/gemma-4-abliterated:26b
-COMFYUI_URL=http://192.168.1.107:1215
+COMFYUI_URL=http://127.0.0.1:1215
 ```
 
-### 3. Запуск
+### 4. Внешние сервисы (для ИИ)
 
-**Двойной клик по `start.bat`**
-
-Или вручную:
 ```cmd
-:: Terminal 1 - Backend
+ollama serve
+ollama pull huihui_ai/gemma-4-abliterated:26b
+```
+
+ComfyUI — в своей папке, с доступом по сети, например:
+
+```cmd
+python main.py --listen 0.0.0.0 --port 1215
+```
+
+### 5. Запуск приложения
+
+**Вариант A:** `start.bat`
+
+**Вариант B:** два терминала:
+
+```cmd
+:: Терминал 1 — backend
 cd backend
 venv\Scripts\activate
 python main.py
 
-:: Terminal 2 - Frontend
-cd frontend
+:: Терминал 2 — frontend (из корня репозитория)
 npm run dev
 ```
 
-### 4. Проверка статуса
+### 6. Проверка
 
-**Двойной клик по `check-status.bat`**
+- Frontend: **http://localhost:3000**
+- Backend: **http://localhost:8000**
+- Swagger: **http://localhost:8000/docs**
+- Статус сервисов: `check-status.bat`
 
-Покажет что работает, а что нет.
+## Локальный запуск (Linux / macOS)
 
-### 5. Открыть
+```bash
+git clone <url-репозитория> neironovel
+cd neironovel
 
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
+# Backend
+cd backend
+bash setup.sh
+# отредактируй .env
+source venv/bin/activate
+python main.py &
+cd ..
 
-## 🎨 Возможности
+# Frontend
+npm install
+npm run dev
+```
 
-### Режим чата
-- Мульти-персонажные диалоги
-- Разные шрифты для каждого персонажа
-- Генерация изображений для каждой сцены
-- Перегенерация текста и картинок
-- Выбор между вариантами
+Или из корня: `chmod +x start.sh && ./start.sh` (после `setup.sh` и `npm install`).
 
-### Режим визуальной новеллы
-- Полноэкранный режим
-- Фоновые изображения сцен
-- Typewriter эффект для текста
-- Навигация стрелками и пробелом
-- Горячие клавиши
+## Сборка frontend для production
 
-### Генерация
-- Текст: Ollama + Gemma 4 26B
-- Изображения: ComfyUI + SDXL
-- Апскейл: RealESRGAN x2 (2560x1440)
-- Стиль: настраиваемые пресеты
+```bash
+npm run build
+```
 
-## 🔧 Технологии
+Артефакт: папка `dist/`. Раздача и связка с API — в [DEPLOY.md](DEPLOY.md).
 
-### Frontend
-- React 18 + TypeScript
-- Tailwind CSS
-- Vite
-- Lucide Icons
+## Документация
 
-### Backend
-- Python 3.10+
-- FastAPI
-- SQLAlchemy + SQLite
-- httpx (async HTTP)
-- Pydantic
+- [backend/README.md](backend/README.md) — API и backend
+- [DEPLOY.md](DEPLOY.md) — деплой на сервер (nginx, systemd, SSL)
+- Swagger (локально): http://localhost:8000/docs
 
-### AI
-- Ollama (локальный LLM)
-- ComfyUI (Stable Diffusion)
-- SDXL модели
-- RealESRGAN (апскейл)
+## Troubleshooting
 
-## 📖 Документация
+### Backend падает при старте на Windows
 
-- [Backend README](backend/README.md) — установка и API
-- [API Docs](http://localhost:8000/docs) — Swagger UI
-
-## 🐛 Troubleshooting
+Обнови код из репозитория: в `main.py` настроен вывод UTF-8 для консоли. Либо запускай с `set PYTHONUTF8=1`.
 
 ### Ollama не отвечает
+
 ```bash
 ollama serve
 curl http://localhost:11434/api/tags
 ```
 
 ### ComfyUI не отвечает
-```bash
-# Запусти с --listen
-cd ComfyUI
-python main.py --listen 0.0.0.0 --port 1215
-```
 
-### Картинки серые
-- Проверь что VAE в узле "32" ссылается на `["18", 2]`
-- Это критично для корректной генерации
+Проверь `COMFYUI_URL` в `backend/.env` и что ComfyUI слушает `--listen 0.0.0.0`.
 
-### Медленная генерация
-- Уменьши разрешение до 1024x576
-- Убери апскейл или используй x1.5
-- Уменьши steps до 25-30
+### `/health` долго висит
 
-## 📝 Лицензия
+Эндпоинт опрашивает Ollama и ComfyUI. Если они выключены, ответ может задерживаться — для проверки API используй `/docs`.
+
+### Картинки серые (ComfyUI)
+
+В workflow проверь VAE в узле «32»: ссылка `["18", 2]`.
+
+## Лицензия
 
 MIT
-# neironovel
-# neironovel
-# neironovel
