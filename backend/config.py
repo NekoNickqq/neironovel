@@ -4,12 +4,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Config:
-    # Ollama
+    # Ollama (значения по умолчанию; можно переопределить в runtime через /ollama/settings)
     OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
     OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "huihui_ai/gemma-4-abliterated:26b")
     OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "300"))
     OLLAMA_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.8"))
     OLLAMA_TOP_P = float(os.getenv("OLLAMA_TOP_P", "0.9"))
+    # Внешнее Ollama API с авторизацией по ключу (режим "api")
+    OLLAMA_API_BASE_URL = os.getenv("OLLAMA_API_BASE_URL", "https://ollama.com")
+    OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "")
+    OLLAMA_API_MODEL = os.getenv("OLLAMA_API_MODEL", "qwen2.5:7b")
     
     # ComfyUI
     COMFYUI_URL = os.getenv("COMFYUI_URL", "http://192.168.1.107:1215")

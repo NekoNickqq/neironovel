@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from config import config
 from database import init_db, get_db, Dialogue, DialogueSettings, Message
 from ollama_client import ollama_client
+from ollama_settings import ollama_settings
 from comfyui_client import comfyui_client
 from utils import build_system_prompt, build_avatar_prompt, build_avatar_negative
 
@@ -26,7 +27,7 @@ async def lifespan(app: FastAPI):
     # Startup
     init_db()
     print("✅ Database initialized")
-    print(f"🦙 Ollama: {config.OLLAMA_URL}")
+    print(f"🦙 Ollama [{ollama_client.mode}]: {ollama_client.url} (model: {ollama_client.model})")
     print(f"🎨 ComfyUI: {config.COMFYUI_URL}")
     yield
     # Shutdown
@@ -63,10 +64,20 @@ class SendMessageRequest(BaseModel):
     dialogue_id: str
     user_text: str
     generate_image: bool = True
+    model: Optional[str] = None  # необязательное переопределение модели Ollama
 
 class RegenerateRequest(BaseModel):
     dialogue_id: str
     message_id: str
+    model: Optional[str] = None  # необязательное переопределение модели Ollama
+
+class OllamaSettingsRequest(BaseModel):
+    mode: Optional[str] = None  # "local" | "api"
+    ollama_url: Optional[str] = None
+    api_base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    model_local: Optional[str] = None
+    model_api: Optional[str] = None
 
 # ============ Эндпоинты ============
 
@@ -84,6 +95,56 @@ async def health_check():
             "ollama": ollama_ok,
             "comfyui": comfyui_ok
         }
+    }
+
+# ---------- Настройки и модели Ollama ----------
+
+def _mask_key(key: str) -> str:
+    """Маскирует API-ключ для безопасной передачи во фронтенд."""
+    if not key:
+        return ""
+    if len(key) <= 8:
+        return "*" * len(key)
+    return key[:4] + "*" * (len(key) - 8) + key[-4:]
+
+@app.get("/ollama/settings")
+async def get_ollama_settings():
+    """Текущие настройки Ollama (ключ замаскирован) + активная модель/URL"""
+    data = ollama_settings.get_all()
+    return {
+        "mode": data["mode"],
+        "ollama_url": data["ollama_url"],
+        "api_base_url": data["api_base_url"],
+        "api_key_set": bool(data.get("api_key")),
+        "api_key_masked": _mask_key(data.get("api_key", "")),
+        "model_local": data["model_local"],
+        "model_api": data["model_api"],
+        "active_model": ollama_client.model,
+        "active_url": ollama_client.url,
+    }
+
+@app.post("/ollama/settings")
+async def update_ollama_settings(req: OllamaSettingsRequest):
+    """Обновить настройки Ollama (режим, URL, API-ключ, модель) без перезапуска."""
+    values = req.dict(exclude_none=True)
+    if not values:
+        raise HTTPException(status_code=400, detail="No settings provided")
+    updated = ollama_settings.update(values)
+    return {
+        "status": "updated",
+        "mode": updated["mode"],
+        "active_model": ollama_client.model,
+        "active_url": ollama_client.url,
+    }
+
+@app.get("/ollama/models")
+async def list_ollama_models():
+    """Список доступных моделей активного подключения (локальные или по API-ключу)."""
+    models = await ollama_client.list_models()
+    return {
+        "mode": ollama_client.mode,
+        "models": models,
+        "current": ollama_client.model,
     }
 
 @app.get("/dialogues")
@@ -229,7 +290,7 @@ async def send_message(req: SendMessageRequest, db: Session = Depends(get_db)):
     
     # 4. Запрос в Ollama
     try:
-        ai_response = await ollama_client.chat(history, system_prompt)
+        ai_response = await ollama_client.chat(history, system_prompt, model=req.model)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ollama error: {str(e)}")
     
@@ -316,7 +377,7 @@ async def regenerate_text(req: RegenerateRequest, db: Session = Depends(get_db))
     )
     
     try:
-        ai_response = await ollama_client.chat(history, system_prompt)
+        ai_response = await ollama_client.chat(history, system_prompt, model=req.model)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ollama error: {str(e)}")
     
@@ -368,7 +429,7 @@ async def regenerate_image(req: RegenerateRequest, db: Session = Depends(get_db)
     system_prompt += "\n\nОтвечай ТОЛЬКО полем image_prompt, без blocks. Формат: {\"image_prompt\": \"...\"}"
     
     try:
-        ai_response = await ollama_client.chat(history, system_prompt)
+        ai_response = await ollama_client.chat(history, system_prompt, model=req.model)
         image_prompt = ai_response.get("image_prompt", "")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ollama error: {str(e)}")

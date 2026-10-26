@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, KeyboardEvent } from 'react';
 import { useApp } from '../store';
-import { ArrowLeft, ImagePlus, RefreshCw, ChevronLeft, ChevronRight, BookOpen } from 'lucide-react';
+import { ArrowLeft, ImagePlus, RefreshCw, ChevronLeft, ChevronRight, BookOpen, Server } from 'lucide-react';
 import { Message, TextBlock } from '../types';
 import { SceneImage } from './SceneImage';
+import { OllamaSettingsModal } from './OllamaSettingsModal';
 
 function MessageBlock({ block, isFirst }: { block: TextBlock; isFirst: boolean }) {
   const fontClass = block.speaker === 'narrator' ? 'font-narrator'
@@ -35,8 +36,12 @@ function MessageBlock({ block, isFirst }: { block: TextBlock; isFirst: boolean }
 
 
 export function ChatMode() {
-  const { state, dispatch, currentDialogue, sendMessage, regenerateText, regenerateImage, selectImage, selectTextVersion } = useApp();
+  const {
+    state, dispatch, currentDialogue, sendMessage, regenerateText, regenerateImage,
+    selectImage, selectTextVersion, setSelectedOllamaModel, refreshOllamaModels,
+  } = useApp();
   const [inputText, setInputText] = useState('');
+  const [showOllamaSettings, setShowOllamaSettings] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -79,6 +84,38 @@ export function ChatMode() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* Выбор модели Ollama */}
+          <select
+            value={state.selectedOllamaModel ?? ''}
+            onChange={e => setSelectedOllamaModel(e.target.value || null)}
+            title="Модель Ollama"
+            className="max-w-[220px] rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 focus:border-purple-500 outline-none"
+          >
+            {state.ollamaModels.length === 0 && <option value="">Нет моделей</option>}
+            {state.ollamaModels.map(m => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+            {state.selectedOllamaModel && !state.ollamaModels.includes(state.selectedOllamaModel) && (
+              <option value={state.selectedOllamaModel}>{state.selectedOllamaModel}</option>
+            )}
+          </select>
+          <button
+            onClick={() => void refreshOllamaModels()}
+            title="Обновить список моделей"
+            className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-all"
+          >
+            <RefreshCw size={16} />
+          </button>
+          <button
+            onClick={() => setShowOllamaSettings(true)}
+            title="Настройки Ollama (локально / API-ключ)"
+            className="flex items-center gap-2 px-3 py-2 bg-gray-800/50 hover:bg-gray-800 border border-gray-700 rounded-lg text-gray-300 text-sm transition-all"
+          >
+            <Server size={16} />
+            Ollama
+          </button>
           <button
             onClick={() => {
               dispatch({ type: 'SELECT_DIALOGUE', payload: currentDialogue.id });
@@ -91,6 +128,10 @@ export function ChatMode() {
           </button>
         </div>
       </div>
+
+      {showOllamaSettings && (
+        <OllamaSettingsModal onClose={() => setShowOllamaSettings(false)} />
+      )}
 
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto px-6 py-6 scrollbar-thin">
