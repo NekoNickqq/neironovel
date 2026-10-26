@@ -30,6 +30,8 @@ export interface Message {
   role: 'user' | 'assistant';
   blocks: TextBlock[];
   image_path: string | null;
+  /** Причина, по которой картинка не была сгенерирована (бэкенд отдаёт её со статус-кодом) */
+  image_error?: string | null;
   image_variants: string[];
   selected_image_index: number;
   has_image: boolean;

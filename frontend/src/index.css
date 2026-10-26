@@ -54,6 +54,49 @@ body {
   background: #6d28d9;
 }
 
+/* Firefox */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #4c1d95 transparent;
+}
+
+/*
+ * "Умный" скроллбар: полоса не видна, пока контент не выходит за пределы
+ * блока (нет class is-overflowing), и плавно появляется при переполнении.
+ */
+.smart-scroll {
+  overflow-y: auto;
+  scrollbar-width: none; /* Firefox: скрыто по умолчанию */
+}
+
+.smart-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.smart-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.smart-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+  transition: background 0.25s ease;
+}
+
+.smart-scroll.is-overflowing {
+  scrollbar-width: thin; /* Firefox: тонкая полоса */
+  scrollbar-color: rgba(109, 40, 217, 0.6) transparent;
+}
+
+.smart-scroll.is-overflowing::-webkit-scrollbar-thumb {
+  background: rgba(109, 40, 217, 0.55);
+}
+
+.smart-scroll.is-overflowing::-webkit-scrollbar-thumb:hover {
+  background: #8b5cf6;
+}
+
 .vn-text-box {
   background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.8) 70%, transparent 100%);
 }

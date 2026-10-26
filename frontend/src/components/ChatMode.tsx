@@ -1,9 +1,34 @@
-import { useState, useRef, useEffect, KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, KeyboardEvent } from 'react';
 import { useApp } from '../store';
-import { ArrowLeft, ImagePlus, RefreshCw, ChevronLeft, ChevronRight, BookOpen, Server } from 'lucide-react';
+import { ArrowLeft, ArrowUp, ImagePlus, RefreshCw, ChevronLeft, ChevronRight, BookOpen, Server } from 'lucide-react';
 import { Message, TextBlock } from '../types';
 import { SceneImage } from './SceneImage';
 import { OllamaSettingsModal } from './OllamaSettingsModal';
+
+/**
+ * Хук: добавляет класс is-overflowing к элементу только когда контент
+ * выходит за его пределы — скроллбар виден лишь при переполнении.
+ */
+function useOverflowIndicator<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+
+  const check = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.classList.toggle('is-overflowing', el.scrollHeight > el.clientHeight + 1);
+  }, []);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [check]);
+
+  return { ref, check };
+}
 
 function MessageBlock({ block, isFirst }: { block: TextBlock; isFirst: boolean }) {
   const fontClass = block.speaker === 'narrator' ? 'font-narrator'
@@ -44,25 +69,31 @@ export function ChatMode() {
   const [showOllamaSettings, setShowOllamaSettings] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { ref: smartScrollRef, check: checkOverflow } = useOverflowIndicator<HTMLDivElement>();
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentDialogue?.messages.length]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend(true);
-    }
+    if (e.key !== 'Enter') return;
+    // Shift+Enter — обычный перенос строки (не перехватываем)
+    if (e.shiftKey) return;
+    e.preventDefault();
+    // Ctrl/Cmd+Enter — отправить только текст; просто Enter — с картинкой
+    handleSend(!(e.ctrlKey || e.metaKey));
   };
 
   const handleSend = (withImage: boolean) => {
-    if (!inputText.trim() || state.isGenerating) return;
-    sendMessage(inputText.trim(), withImage);
+    // trim() + защита от пробелов: раньше текст из "пробелов" блокировал обе кнопки
+    const text = inputText.trim();
+    if (!text || state.isGenerating) return;
+    void sendMessage(text, withImage);
     setInputText('');
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
+    requestAnimationFrame(checkOverflow);
   };
 
   if (!currentDialogue) return null;
@@ -84,14 +115,15 @@ export function ChatMode() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {/* Выбор модели Ollama */}
+          {/* Выбор модели */}
           <select
             value={state.selectedOllamaModel ?? ''}
             onChange={e => setSelectedOllamaModel(e.target.value || null)}
-            title="Модель Ollama"
+            title="Выбор модели"
+            aria-label="Выбор модели"
             className="max-w-[220px] rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 focus:border-purple-500 outline-none"
           >
-            {state.ollamaModels.length === 0 && <option value="">Нет моделей</option>}
+            {state.ollamaModels.length === 0 && <option value="">Выбор модели</option>}
             {state.ollamaModels.map(m => (
               <option key={m} value={m}>
                 {m}
@@ -110,11 +142,11 @@ export function ChatMode() {
           </button>
           <button
             onClick={() => setShowOllamaSettings(true)}
-            title="Настройки Ollama (локально / API-ключ)"
+            title="Настройки подключения к модели (локально / API-ключ)"
             className="flex items-center gap-2 px-3 py-2 bg-gray-800/50 hover:bg-gray-800 border border-gray-700 rounded-lg text-gray-300 text-sm transition-all"
           >
             <Server size={16} />
-            Ollama
+            Выбор модели
           </button>
           <button
             onClick={() => {
@@ -134,7 +166,7 @@ export function ChatMode() {
       )}
 
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto px-6 py-6 scrollbar-thin">
+      <div ref={smartScrollRef} className="flex-1 overflow-y-auto px-6 py-6 smart-scroll">
         <div className="max-w-4xl mx-auto">
           {currentDialogue.messages.length === 0 && (
             <div className="text-center py-20">
@@ -165,7 +197,11 @@ export function ChatMode() {
                     <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                     <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                   </div>
-                  <span className="text-gray-400 text-sm">ИИ генерирует ответ...</span>
+                  <span className="text-gray-400 text-sm">
+                    {state.isGeneratingImage
+                      ? 'Генерация изображения через ComfyUI...'
+                      : 'Языковая модель генерирует ответ...'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -178,40 +214,43 @@ export function ChatMode() {
       {/* Input area */}
       <div className="border-t border-gray-800/50 bg-surface/30 backdrop-blur px-6 py-4">
         <div className="max-w-4xl mx-auto">
-          <div className="flex gap-3 items-end">
-            <div className="flex-1 relative">
-              <textarea
-                ref={textareaRef}
-                value={inputText}
-                onChange={e => {
-                  setInputText(e.target.value);
-                  e.target.style.height = 'auto';
-                  e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
-                }}
-                onKeyDown={handleKeyDown}
-                placeholder="Опиши действие или реплику... (Enter — с картинкой, Shift+Enter — перенос)"
-                rows={1}
-                className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none transition-colors resize-none scrollbar-thin"
-                disabled={state.isGenerating}
-              />
+          <div className="flex items-end gap-2 rounded-2xl border border-gray-700 bg-gray-900/60 p-2 transition-colors focus-within:border-purple-500">
+            {/* Колонка миниатюрных круглых кнопок: картинка — сверху, обычная отправка — снизу */}
+            <div className="flex flex-col gap-1.5 shrink-0 pb-0.5">
+              <button
+                onClick={() => handleSend(true)}
+                disabled={state.isGenerating || !inputText.trim()}
+                className="grid h-9 w-9 place-items-center rounded-full bg-purple-600 text-white shadow-lg shadow-purple-600/25 transition-all hover:bg-purple-500 hover:scale-105 active:scale-95 disabled:bg-gray-800 disabled:text-gray-600 disabled:shadow-none disabled:hover:scale-100"
+                title="Отправить с картинкой (Enter)"
+                aria-label="Отправить с картинкой"
+              >
+                <ImagePlus size={16} />
+              </button>
+              <button
+                onClick={() => handleSend(false)}
+                disabled={state.isGenerating || !inputText.trim()}
+                className="grid h-9 w-9 place-items-center rounded-full bg-gray-700 text-gray-200 transition-all hover:bg-gray-600 hover:scale-105 active:scale-95 disabled:bg-gray-800 disabled:text-gray-600 disabled:hover:scale-100"
+                title="Отправить только текст (Ctrl+Enter)"
+                aria-label="Отправить только текст"
+              >
+                <ArrowUp size={16} />
+              </button>
             </div>
-            <button
-              onClick={() => handleSend(false)}
-              disabled={state.isGenerating || !inputText.trim()}
-              className="flex items-center gap-2 px-4 py-3 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 rounded-xl text-gray-300 text-sm transition-all whitespace-nowrap"
-              title="Только текст (Shift+Enter)"
-            >
-              💬 Текст
-            </button>
-            <button
-              onClick={() => handleSend(true)}
-              disabled={state.isGenerating || !inputText.trim()}
-              className="flex items-center gap-2 px-5 py-3 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-800 disabled:text-gray-600 rounded-xl text-white text-sm font-medium transition-all whitespace-nowrap shadow-lg shadow-purple-600/20"
-              title="Текст + Картинка (Enter)"
-            >
-              <ImagePlus size={16} />
-              Текст + Картинка
-            </button>
+            <textarea
+              ref={textareaRef}
+              value={inputText}
+              onChange={e => {
+                setInputText(e.target.value);
+                e.target.style.height = 'auto';
+                e.target.style.height = Math.min(Math.max(e.target.scrollHeight, 64), 160) + 'px';
+                checkOverflow();
+              }}
+              onKeyDown={handleKeyDown}
+              placeholder="Опиши действие или реплику... (Enter — с картинкой, Shift+Enter — перенос строки)"
+              rows={2}
+              className="min-h-[64px] max-h-[160px] flex-1 resize-none bg-transparent px-3 py-2.5 text-white placeholder-gray-500 focus:outline-none smart-scroll"
+              disabled={state.isGenerating}
+            />
           </div>
         </div>
       </div>
@@ -257,6 +296,17 @@ function ChatMessageItem({
             ))}
           </div>
 
+          {!isUser && message.image_error && !currentImage && (
+            <div className="mt-4 rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-red-400 mb-1">
+                Картинка не сгенерирована
+              </p>
+              <p className="text-sm text-red-200/90 whitespace-pre-wrap break-words">
+                {message.image_error}
+              </p>
+            </div>
+          )}
+
           {currentImage && (
             <div className="mt-4">
               <SceneImage
@@ -293,15 +343,15 @@ function ChatMessageItem({
               <RefreshCw size={12} />
               Текст
             </button>
-            {message.has_image && (
+            {message.has_image || (!!message.image_error && !isUser) ? (
               <button
                 onClick={() => onRegenerateImage(message.id)}
                 className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-400 hover:text-purple-300 hover:bg-purple-900/20 rounded-lg transition-all"
               >
                 <ImagePlus size={12} />
-                Картинка
+                {message.has_image ? 'Картинка' : 'Повторить картинку'}
               </button>
-            )}
+            ) : null}
             {message.text_versions.length > 0 && (
               <div className="flex items-center gap-1 ml-2">
                 <button

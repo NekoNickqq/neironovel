@@ -57,7 +57,13 @@ class ComfyUIClient:
                     f"{self.url}/prompt",
                     json={"prompt": workflow}
                 )
-                response.raise_for_status()
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as e:
+                    raise Exception(
+                        f"ComfyUI rejected the request (HTTP {e.response.status_code}): "
+                        f"{e.response.text[:200]}"
+                    )
                 result = response.json()
                 prompt_id = result.get("prompt_id")
                 
@@ -69,7 +75,9 @@ class ComfyUIClient:
                 return image_path
                 
             except httpx.TimeoutException:
-                raise Exception(f"ComfyUI timeout after {self.timeout}s")
+                raise Exception(f"ComfyUI timeout after {self.timeout}s (server did not respond)")
+            except httpx.ConnectError:
+                raise Exception(f"Cannot connect to ComfyUI at {self.url} — is the server running?")
             except httpx.HTTPError as e:
                 raise Exception(f"ComfyUI HTTP error: {e}")
     
@@ -82,7 +90,9 @@ class ComfyUIClient:
                 # Проверяем таймаут
                 elapsed = asyncio.get_event_loop().time() - start_time
                 if elapsed > self.timeout:
-                    raise Exception(f"Generation timeout after {self.timeout}s")
+                    raise Exception(
+                        f"Generation timeout after {self.timeout}s — ComfyUI did not finish the job"
+                    )
                 
                 # Запрашиваем историю
                 try:
@@ -110,6 +120,11 @@ class ComfyUIClient:
                                         # Сохраняем в gallery
                                         saved_path = await self._save_image(image_data, prompt_id)
                                         return saved_path
+
+                            # Задача завершена, но изображений в outputs нет
+                            status = history.get("status")
+                            if isinstance(status, dict) and status.get("status_str") == "error":
+                                raise Exception(f"ComfyUI workflow error: {json.dumps(status)[:300]}")
                 
                 except httpx.HTTPError:
                     pass  # Продолжаем опрос
@@ -126,7 +141,10 @@ class ComfyUIClient:
                 "subfolder": subfolder
             }
             response = await client.get(f"{self.url}/view", params=params)
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                raise Exception(f"Failed to download generated image (HTTP {e.response.status_code})")
             return response.content
     
     async def _save_image(self, image_data: bytes, prompt_id: str) -> str:

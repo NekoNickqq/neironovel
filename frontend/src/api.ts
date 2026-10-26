@@ -59,7 +59,7 @@ type ApiDialogueSummary = {
 
 export function resolveMediaUrl(path: string | null | undefined): string | null {
   if (!path) return null;
-  if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('/demo/')) {
+  if (path.startsWith('http://') || path.startsWith('https://')) {
     return path;
   }
   if (path.startsWith('/gallery/') || path.startsWith('/avatars/')) {
@@ -74,6 +74,7 @@ function normalizeMessage(m: Message): Message {
     ...m,
     blocks: m.blocks ?? [],
     image_path: resolveMediaUrl(m.image_path),
+    image_error: m.image_error ?? null,
     image_variants: imageVariants,
     text_versions: m.text_versions ?? [],
   };
@@ -184,7 +185,7 @@ export const api = {
     request<{ status: string }>(`/dialogues/${id}`, { method: 'DELETE' }),
 
   sendMessage: (dialogueId: string, userText: string, generateImage: boolean, model?: string | null) =>
-    request<{ assistant_message_id: string; has_image: boolean; image_path: string | null }>(
+    request<{ assistant_message_id: string; has_image: boolean; image_path: string | null; image_error?: string | null }>(
       '/message',
       {
         method: 'POST',
