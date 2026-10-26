@@ -79,7 +79,7 @@ def build_system_prompt(world_lore: str, character_cards: list, style_preset: st
 2. Массив blocks должен содержать реплики персонажей и описания narrатива.
 3. speaker может быть: "narrator", "hero", "sidekick", "user".
 4. narrator описывает окружение, действия, атмосферу (используй *звёздочки* для действий).
-5. image_prompt — детальное визуальное описание сцены на английском для генерации картинки.
+5. image_prompt — детальное визуальное описание текущей сцены на английском для генерации картинки. ПОЛЯ image_prompt ОБЯЗАТЕЛЬНА В КАЖДОМ ОТВЕТЕ, без исключений — никогда не опускай её и не оставляй пустой.
 6. В image_prompt обязательно добавь стиль: {style_preset}
 7. Отвечай на языке пользователя (обычно русский).
 
@@ -91,7 +91,9 @@ def build_system_prompt(world_lore: str, character_cards: list, style_preset: st
     {{"speaker": "sidekick", "text": "Реплика спутника"}}
   ],
   "image_prompt": "detailed visual scene description in English, characters, poses, lighting, environment, {style_preset}"
-}}"""
+}}
+
+Помни: ответ всегда должен содержать И blocks, И непустую image_prompt."""
     
     return prompt
 

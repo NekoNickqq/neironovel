@@ -14,6 +14,10 @@ interface AppState {
   currentDialogueId: string | null;
   currentView: AppView;
   isGenerating: boolean;
+  /** true на этапе генерации изображения (LLM уже ответил, работает ComfyUI) */
+  isGeneratingImage: boolean;
+  /** текст ошибки, сохранённый в конкретном сообщении ассистента (картинка не сгенерирована) */
+  lastMessageError: string | null;
   isLoadingList: boolean;
   novelModeHidden: boolean;
   apiError: string | null;
@@ -29,6 +33,8 @@ type Action =
   | { type: 'UPSERT_DIALOGUE'; payload: Dialogue }
   | { type: 'SELECT_DIALOGUE'; payload: string }
   | { type: 'SET_GENERATING'; payload: boolean }
+  | { type: 'SET_GENERATING_IMAGE'; payload: boolean }
+  | { type: 'SET_LAST_MESSAGE_ERROR'; payload: string | null }
   | { type: 'SET_LOADING_LIST'; payload: boolean }
   | { type: 'SET_API_ERROR'; payload: string | null }
   | { type: 'SET_SERVICES'; payload: { ollama: boolean; comfyui: boolean } | null }
@@ -44,6 +50,8 @@ const initialState: AppState = {
   currentDialogueId: null,
   currentView: 'list',
   isGenerating: false,
+  isGeneratingImage: false,
+  lastMessageError: null,
   isLoadingList: true,
   novelModeHidden: false,
   apiError: null,
@@ -72,7 +80,15 @@ function reducer(state: AppState, action: Action): AppState {
     case 'SELECT_DIALOGUE':
       return { ...state, currentDialogueId: action.payload };
     case 'SET_GENERATING':
-      return { ...state, isGenerating: action.payload };
+      return {
+        ...state,
+        isGenerating: action.payload,
+        isGeneratingImage: action.payload ? state.isGeneratingImage : false,
+      };
+    case 'SET_GENERATING_IMAGE':
+      return { ...state, isGeneratingImage: action.payload };
+    case 'SET_LAST_MESSAGE_ERROR':
+      return { ...state, lastMessageError: action.payload };
     case 'SET_LOADING_LIST':
       return { ...state, isLoadingList: action.payload };
     case 'SET_API_ERROR':
@@ -269,12 +285,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!state.currentDialogueId) return;
       dispatch({ type: 'SET_GENERATING', payload: true });
       dispatch({ type: 'SET_API_ERROR', payload: null });
+      dispatch({ type: 'SET_LAST_MESSAGE_ERROR', payload: null });
+
+      // Бэкенд генерирует строго последовательно: сначала LLM (текст), затем ComfyUI (картинка).
+      // Переключаем индикатор на этап изображения после примерного времени ответа LLM.
+      let imageStageTimer: ReturnType<typeof setTimeout> | undefined;
+      if (generateImage) {
+        imageStageTimer = setTimeout(
+          () => dispatch({ type: 'SET_GENERATING_IMAGE', payload: true }),
+          6000,
+        );
+      }
+
       try {
         await api.sendMessage(state.currentDialogueId, text, generateImage, state.selectedOllamaModel);
-        await reloadCurrentDialogue();
       } catch (err) {
+        // Ошибки 500/502 от /message означают, что текст уже сохранён, но картинка не получилась.
         dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
       } finally {
+        if (imageStageTimer) clearTimeout(imageStageTimer);
+        // Всегда перечитываем диалог — сообщение ассистента могло сохраниться даже со статусом ошибки.
+        try {
+          await reloadCurrentDialogue();
+        } catch {
+          /* ignore */
+        }
         dispatch({ type: 'SET_GENERATING', payload: false });
       }
     },

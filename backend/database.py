@@ -46,6 +46,7 @@ class Message(Base):
     content = Column(JSON, default=list)  # Array of {speaker, text}
     original_user_text = Column(Text, nullable=True)
     image_path = Column(String, nullable=True)
+    image_error = Column(Text, nullable=True)  # Причина, по которой картинка не сгенерирована
     image_variants = Column(JSON, default=list)  # Array of image paths
     selected_image_index = Column(Integer, default=0)
     has_image = Column(Boolean, default=False)
@@ -67,6 +68,18 @@ def init_db():
     if db_dir:
         os.makedirs(db_dir, exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    _migrate()
+
+def _migrate():
+    """Лёгкие миграции для SQLite: добавление отсутствующих колонок."""
+    from sqlalchemy import text, inspect
+    insp = inspect(engine)
+    if "messages" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("messages")}
+    if "image_error" not in cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE messages ADD COLUMN image_error TEXT"))
 
 def get_db():
     """Dependency for FastAPI"""

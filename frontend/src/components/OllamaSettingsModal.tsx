@@ -104,7 +104,7 @@ export function OllamaSettingsModal({ onClose }: Props) {
         <div className="flex items-start justify-between mb-4">
           <h2 className="text-lg font-semibold flex items-center gap-2">
             <Server size={18} className="text-purple-400" />
-            Настройки Ollama
+            Выбор модели (Ollama)
           </h2>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-white">
             <X size={18} />

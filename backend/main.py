@@ -206,6 +206,7 @@ async def get_dialogue(dialogue_id: str, db: Session = Depends(get_db)):
             "role": m.role,
             "blocks": m.content,
             "image_path": m.image_path,
+            "image_error": m.image_error,
             "image_variants": m.image_variants,
             "selected_image_index": m.selected_image_index,
             "has_image": m.has_image,
@@ -294,19 +295,46 @@ async def send_message(req: SendMessageRequest, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ollama error: {str(e)}")
     
-    # 5. Генерация картинки (если нужно)
+    # 5. Генерация картинки (если нужно) — только чистая генерация через ComfyUI,
+    # без заглушек. Если картинку получить не удалось — сохраняем причину ошибки
+    # в image_error и возвращаем её клиенту вместе с HTTP статус-кодом.
     image_path = None
     has_image = False
     image_variants = []
+    image_error = None
     
-    if req.generate_image and ai_response.get("image_prompt"):
-        try:
-            image_path = await comfyui_client.generate_image(ai_response["image_prompt"])
-            has_image = True
-            image_variants = [image_path]
-        except Exception as e:
-            print(f"⚠️ Image generation failed: {e}")
-            # Продолжаем без картинки
+    if req.generate_image:
+        # Если модель не вернула image_prompt — просим сгенерировать его отдельно,
+        # иначе картинки пропадали бы молча (чаще всего на втором и последующих ходах).
+        image_prompt = (ai_response.get("image_prompt") or "").strip()
+        if not image_prompt:
+            try:
+                history_with_answer = history + [{
+                    "role": "assistant",
+                    "content": "\n".join(
+                        f"[{b['speaker']}]: {b['text']}" for b in ai_response.get("blocks", [])
+                    ),
+                }]
+                prompt_only_system = system_prompt + (
+                    "\n\nОтвечай ТОЛЬКО полем image_prompt, без blocks. "
+                    "Формат: {\"image_prompt\": \"...\"}"
+                )
+                prompt_resp = await ollama_client.chat(
+                    history_with_answer, prompt_only_system, model=req.model
+                )
+                image_prompt = (prompt_resp.get("image_prompt") or "").strip()
+            except Exception as e:
+                image_error = f"Не удалось получить image_prompt от языковой модели ({type(e).__name__}): {e}"
+
+        if image_prompt:
+            try:
+                image_path = await comfyui_client.generate_image(image_prompt)
+                has_image = True
+                image_variants = [image_path]
+            except Exception as e:
+                image_error = f"Ошибка генерации изображения в ComfyUI ({type(e).__name__}): {e}"
+        elif image_error is None:
+            image_error = "Языковая модель не вернула image_prompt — картинка не может быть сгенерирована"
     
     # 6. Сохраняем ответ ассистента
     assistant_msg_id = str(uuid.uuid4())
@@ -316,6 +344,7 @@ async def send_message(req: SendMessageRequest, db: Session = Depends(get_db)):
         role="assistant",
         content=ai_response.get("blocks", []),
         image_path=image_path,
+        image_error=image_error,
         image_variants=image_variants,
         selected_image_index=0,
         has_image=has_image,
@@ -327,13 +356,20 @@ async def send_message(req: SendMessageRequest, db: Session = Depends(get_db)):
     db.add(assistant_message)
     db.commit()
     
-    return {
+    result = {
         "user_message_id": user_msg_id,
         "assistant_message_id": assistant_msg_id,
         "ai_text": ai_response.get("blocks", []),
         "has_image": has_image,
-        "image_path": image_path
+        "image_path": image_path,
+        "image_error": image_error,
     }
+    # Текст сообщения уже сохранён в БД; если картинка не сгенерирована —
+    # отдаём ошибку со статус-кодом и причиной, чтобы фронтенд показал её пользователю.
+    if image_error:
+        status = 502 if "ComfyUI" in image_error else 500
+        raise HTTPException(status_code=status, detail=image_error)
+    return result
 
 @app.post("/regenerate/text")
 async def regenerate_text(req: RegenerateRequest, db: Session = Depends(get_db)):
@@ -450,6 +486,7 @@ async def regenerate_image(req: RegenerateRequest, db: Session = Depends(get_db)
     message.selected_image_index = len(image_variants) - 1
     message.has_image = True
     message.image_path = new_image_path
+    message.image_error = None  # перегенерация прошла успешно — убираем ошибку
     db.commit()
     
     return {
