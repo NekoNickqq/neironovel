@@ -80,20 +80,24 @@ export function ChatMode() {
     // Shift+Enter — обычный перенос строки (не перехватываем)
     if (e.shiftKey) return;
     e.preventDefault();
-    // Ctrl/Cmd+Enter — отправить только текст; просто Enter — с картинкой
-    handleSend(!(e.ctrlKey || e.metaKey));
+    // Enter — отправить только текст; Ctrl/Cmd+Enter — с картинкой
+    handleSend(e.ctrlKey || e.metaKey);
   };
 
-  const handleSend = (withImage: boolean) => {
-    // trim() + защита от пробелов: раньше текст из "пробелов" блокировал обе кнопки
+  const handleSend = async (withImage: boolean) => {
+    // trim() + защита от пробелов: текст из "пробелов" не должен отправляться
     const text = inputText.trim();
     if (!text || state.isGenerating) return;
-    void sendMessage(text, withImage);
     setInputText('');
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
     requestAnimationFrame(checkOverflow);
+    try {
+      await sendMessage(text, withImage);
+    } catch {
+      // ошибка уже показана в статус-баре (SET_API_ERROR в store)
+    }
   };
 
   if (!currentDialogue) return null;
@@ -218,19 +222,21 @@ export function ChatMode() {
             {/* Колонка миниатюрных круглых кнопок: картинка — сверху, обычная отправка — снизу */}
             <div className="flex flex-col gap-1.5 shrink-0 pb-0.5">
               <button
-                onClick={() => handleSend(true)}
+                type="button"
+                onClick={() => void handleSend(true)}
                 disabled={state.isGenerating || !inputText.trim()}
                 className="grid h-9 w-9 place-items-center rounded-full bg-purple-600 text-white shadow-lg shadow-purple-600/25 transition-all hover:bg-purple-500 hover:scale-105 active:scale-95 disabled:bg-gray-800 disabled:text-gray-600 disabled:shadow-none disabled:hover:scale-100"
-                title="Отправить с картинкой (Enter)"
+                title="Отправить с картинкой (Ctrl+Enter)"
                 aria-label="Отправить с картинкой"
               >
                 <ImagePlus size={16} />
               </button>
               <button
-                onClick={() => handleSend(false)}
+                type="button"
+                onClick={() => void handleSend(false)}
                 disabled={state.isGenerating || !inputText.trim()}
                 className="grid h-9 w-9 place-items-center rounded-full bg-gray-700 text-gray-200 transition-all hover:bg-gray-600 hover:scale-105 active:scale-95 disabled:bg-gray-800 disabled:text-gray-600 disabled:hover:scale-100"
-                title="Отправить только текст (Ctrl+Enter)"
+                title="Отправить только текст (Enter)"
                 aria-label="Отправить только текст"
               >
                 <ArrowUp size={16} />
@@ -246,7 +252,7 @@ export function ChatMode() {
                 checkOverflow();
               }}
               onKeyDown={handleKeyDown}
-              placeholder="Опиши действие или реплику... (Enter — с картинкой, Shift+Enter — перенос строки)"
+              placeholder="Опиши действие или реплику... (Enter — текст, Ctrl+Enter — с картинкой, Shift+Enter — перенос строки)"
               rows={2}
               className="min-h-[64px] max-h-[160px] flex-1 resize-none bg-transparent px-3 py-2.5 text-white placeholder-gray-500 focus:outline-none smart-scroll"
               disabled={state.isGenerating}
@@ -274,6 +280,7 @@ function ChatMessageItem({
   onSelectImage: (messageId: string, index: number) => void;
   onSelectVersion: (messageId: string, index: number) => void;
 }) {
+  const { state } = useApp();
   const isUser = message.role === 'user';
   const currentBlocks = message.text_versions.length > 0 && message.selected_version_index > 0
     ? message.text_versions[message.selected_version_index - 1]
@@ -338,7 +345,8 @@ function ChatMessageItem({
           <div className="flex items-center gap-2 mt-2 ml-2">
             <button
               onClick={() => onRegenerateText(message.id)}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-400 hover:text-purple-300 hover:bg-purple-900/20 rounded-lg transition-all"
+              disabled={state.isGenerating}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-400 hover:text-purple-300 hover:bg-purple-900/20 rounded-lg transition-all disabled:opacity-40 disabled:pointer-events-none"
             >
               <RefreshCw size={12} />
               Текст
@@ -346,7 +354,8 @@ function ChatMessageItem({
             {message.has_image || (!!message.image_error && !isUser) ? (
               <button
                 onClick={() => onRegenerateImage(message.id)}
-                className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-400 hover:text-purple-300 hover:bg-purple-900/20 rounded-lg transition-all"
+                disabled={state.isGenerating}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-400 hover:text-purple-300 hover:bg-purple-900/20 rounded-lg transition-all disabled:opacity-40 disabled:pointer-events-none"
               >
                 <ImagePlus size={12} />
                 {message.has_image ? 'Картинка' : 'Повторить картинку'}
