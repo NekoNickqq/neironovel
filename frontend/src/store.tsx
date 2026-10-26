@@ -7,7 +7,7 @@ import React, {
   ReactNode,
 } from 'react';
 import { Dialogue, Message, TextBlock, AppView } from './types';
-import { api, ApiError } from './api';
+import { api, ApiError, OllamaMode } from './api';
 
 interface AppState {
   dialogues: Dialogue[];
@@ -18,6 +18,9 @@ interface AppState {
   novelModeHidden: boolean;
   apiError: string | null;
   services: { ollama: boolean; comfyui: boolean } | null;
+  ollamaMode: OllamaMode;
+  ollamaModels: string[];
+  selectedOllamaModel: string | null; // null = использовать модель по умолчанию из настроек
 }
 
 type Action =
@@ -29,6 +32,8 @@ type Action =
   | { type: 'SET_LOADING_LIST'; payload: boolean }
   | { type: 'SET_API_ERROR'; payload: string | null }
   | { type: 'SET_SERVICES'; payload: { ollama: boolean; comfyui: boolean } | null }
+  | { type: 'SET_OLLAMA_INFO'; payload: { mode: OllamaMode; models: string[]; current: string } }
+  | { type: 'SET_SELECTED_OLLAMA_MODEL'; payload: string | null }
   | { type: 'TOGGLE_NOVEL_HIDDEN' }
   | { type: 'SELECT_IMAGE'; payload: { messageId: string; index: number } }
   | { type: 'SELECT_TEXT_VERSION'; payload: { messageId: string; index: number } }
@@ -43,6 +48,9 @@ const initialState: AppState = {
   novelModeHidden: false,
   apiError: null,
   services: null,
+  ollamaMode: 'local',
+  ollamaModels: [],
+  selectedOllamaModel: null,
 };
 
 function upsertDialogueList(dialogues: Dialogue[], dialogue: Dialogue): Dialogue[] {
@@ -71,6 +79,16 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, apiError: action.payload };
     case 'SET_SERVICES':
       return { ...state, services: action.payload };
+    case 'SET_OLLAMA_INFO': {
+      const { mode, models, current } = action.payload;
+      const selected =
+        state.selectedOllamaModel && models.includes(state.selectedOllamaModel)
+          ? state.selectedOllamaModel
+          : current || null;
+      return { ...state, ollamaMode: mode, ollamaModels: models, selectedOllamaModel: selected };
+    }
+    case 'SET_SELECTED_OLLAMA_MODEL':
+      return { ...state, selectedOllamaModel: action.payload };
     case 'TOGGLE_NOVEL_HIDDEN':
       return { ...state, novelModeHidden: !state.novelModeHidden };
     case 'SELECT_IMAGE': {
@@ -128,10 +146,12 @@ interface AppContextType {
   }) => Promise<void>;
   deleteDialogue: (id: string) => Promise<void>;
   sendMessage: (text: string, generateImage: boolean) => Promise<void>;
-  regenerateText: (messageId: string) => Promise<void>;
-  regenerateImage: (messageId: string) => Promise<void>;
+  regenerateText: (messageId: string, model?: string | null) => Promise<void>;
+  regenerateImage: (messageId: string, model?: string | null) => Promise<void>;
   selectImage: (messageId: string, index: number) => Promise<void>;
   selectTextVersion: (messageId: string, index: number) => Promise<void>;
+  refreshOllamaModels: () => Promise<void>;
+  setSelectedOllamaModel: (model: string | null) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -164,10 +184,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const refreshOllamaModels = useCallback(async () => {
+    try {
+      const info = await api.listOllamaModels();
+      dispatch({ type: 'SET_OLLAMA_INFO', payload: info });
+    } catch {
+      /* ignore — сервер может быть недоступен */
+    }
+  }, []);
+
+  const setSelectedOllamaModel = useCallback((model: string | null) => {
+    dispatch({ type: 'SET_SELECTED_OLLAMA_MODEL', payload: model });
+  }, []);
+
   useEffect(() => {
     void refreshDialogueList();
     void refreshHealth();
-  }, [refreshDialogueList, refreshHealth]);
+    void refreshOllamaModels();
+  }, [refreshDialogueList, refreshHealth, refreshOllamaModels]);
 
   const openDialogue = useCallback(async (id: string) => {
     try {
@@ -236,7 +270,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'SET_GENERATING', payload: true });
       dispatch({ type: 'SET_API_ERROR', payload: null });
       try {
-        await api.sendMessage(state.currentDialogueId, text, generateImage);
+        await api.sendMessage(state.currentDialogueId, text, generateImage, state.selectedOllamaModel);
         await reloadCurrentDialogue();
       } catch (err) {
         dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
@@ -244,16 +278,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'SET_GENERATING', payload: false });
       }
     },
-    [state.currentDialogueId, reloadCurrentDialogue],
+    [state.currentDialogueId, state.selectedOllamaModel, reloadCurrentDialogue],
   );
 
   const regenerateText = useCallback(
-    async (messageId: string) => {
+    async (messageId: string, model?: string | null) => {
       if (!state.currentDialogueId) return;
       dispatch({ type: 'SET_GENERATING', payload: true });
       dispatch({ type: 'SET_API_ERROR', payload: null });
       try {
-        await api.regenerateText(state.currentDialogueId, messageId);
+        await api.regenerateText(
+          state.currentDialogueId,
+          messageId,
+          model ?? state.selectedOllamaModel,
+        );
         await reloadCurrentDialogue();
       } catch (err) {
         dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
@@ -261,16 +299,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'SET_GENERATING', payload: false });
       }
     },
-    [state.currentDialogueId, reloadCurrentDialogue],
+    [state.currentDialogueId, state.selectedOllamaModel, reloadCurrentDialogue],
   );
 
   const regenerateImage = useCallback(
-    async (messageId: string) => {
+    async (messageId: string, model?: string | null) => {
       if (!state.currentDialogueId) return;
       dispatch({ type: 'SET_GENERATING', payload: true });
       dispatch({ type: 'SET_API_ERROR', payload: null });
       try {
-        await api.regenerateImage(state.currentDialogueId, messageId);
+        await api.regenerateImage(
+          state.currentDialogueId,
+          messageId,
+          model ?? state.selectedOllamaModel,
+        );
         await reloadCurrentDialogue();
       } catch (err) {
         dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
@@ -278,7 +320,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'SET_GENERATING', payload: false });
       }
     },
-    [state.currentDialogueId, reloadCurrentDialogue],
+    [state.currentDialogueId, state.selectedOllamaModel, reloadCurrentDialogue],
   );
 
   const selectImage = useCallback(async (messageId: string, index: number) => {
@@ -316,6 +358,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         regenerateImage,
         selectImage,
         selectTextVersion,
+        refreshOllamaModels,
+        setSelectedOllamaModel,
       }}
     >
       {children}

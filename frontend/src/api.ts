@@ -115,8 +115,45 @@ export function summaryToDialogue(s: ApiDialogueSummary): Dialogue {
   };
 }
 
+export type OllamaMode = 'local' | 'api';
+
+export interface OllamaSettingsInfo {
+  mode: OllamaMode;
+  ollama_url: string;
+  api_base_url: string;
+  api_key_set: boolean;
+  api_key_masked: string;
+  model_local: string;
+  model_api: string;
+  active_model: string;
+  active_url: string;
+}
+
+export interface OllamaModelsInfo {
+  mode: OllamaMode;
+  models: string[];
+  current: string;
+}
+
 export const api = {
   health: () => request<{ status: string; services: { ollama: boolean; comfyui: boolean } }>('/health'),
+
+  getOllamaSettings: () => request<OllamaSettingsInfo>('/ollama/settings'),
+
+  updateOllamaSettings: (body: Partial<{
+    mode: OllamaMode;
+    ollama_url: string;
+    api_base_url: string;
+    api_key: string;
+    model_local: string;
+    model_api: string;
+  }>) =>
+    request<{ status: string; mode: OllamaMode; active_model: string; active_url: string }>(
+      '/ollama/settings',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+
+  listOllamaModels: () => request<OllamaModelsInfo>('/ollama/models'),
 
   listDialogues: async (): Promise<Dialogue[]> => {
     const rows = await request<ApiDialogueSummary[]>('/dialogues');
@@ -146,7 +183,7 @@ export const api = {
   deleteDialogue: (id: string) =>
     request<{ status: string }>(`/dialogues/${id}`, { method: 'DELETE' }),
 
-  sendMessage: (dialogueId: string, userText: string, generateImage: boolean) =>
+  sendMessage: (dialogueId: string, userText: string, generateImage: boolean, model?: string | null) =>
     request<{ assistant_message_id: string; has_image: boolean; image_path: string | null }>(
       '/message',
       {
@@ -155,25 +192,34 @@ export const api = {
           dialogue_id: dialogueId,
           user_text: userText,
           generate_image: generateImage,
+          ...(model ? { model } : {}),
         }),
       },
     ),
 
-  regenerateText: (dialogueId: string, messageId: string) =>
+  regenerateText: (dialogueId: string, messageId: string, model?: string | null) =>
     request<{ message_id: string; new_blocks: Message['blocks']; version_count: number }>(
       '/regenerate/text',
       {
         method: 'POST',
-        body: JSON.stringify({ dialogue_id: dialogueId, message_id: messageId }),
+        body: JSON.stringify({
+          dialogue_id: dialogueId,
+          message_id: messageId,
+          ...(model ? { model } : {}),
+        }),
       },
     ),
 
-  regenerateImage: (dialogueId: string, messageId: string) =>
+  regenerateImage: (dialogueId: string, messageId: string, model?: string | null) =>
     request<{ message_id: string; new_image_path: string; variant_count: number }>(
       '/regenerate/image',
       {
         method: 'POST',
-        body: JSON.stringify({ dialogue_id: dialogueId, message_id: messageId }),
+        body: JSON.stringify({
+          dialogue_id: dialogueId,
+          message_id: messageId,
+          ...(model ? { model } : {}),
+        }),
       },
     ),
 
