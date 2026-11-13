@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, KeyboardEvent } from 'react';
 import { useApp } from '../store';
-import { ArrowLeft, ImagePlus, RefreshCw, ChevronLeft, ChevronRight, BookOpen, Server } from 'lucide-react';
+import { ArrowLeft, ImagePlus, RefreshCw, ChevronLeft, ChevronRight, BookOpen, Server, Send } from 'lucide-react';
 import { Message, TextBlock } from '../types';
 import { SceneImage } from './SceneImage';
 import { OllamaSettingsModal } from './OllamaSettingsModal';
@@ -178,40 +178,42 @@ export function ChatMode() {
       {/* Input area */}
       <div className="border-t border-gray-800/50 bg-surface/30 backdrop-blur px-6 py-4">
         <div className="max-w-4xl mx-auto">
-          <div className="flex gap-3 items-end">
-            <div className="flex-1 relative">
-              <textarea
-                ref={textareaRef}
-                value={inputText}
-                onChange={e => {
-                  setInputText(e.target.value);
-                  e.target.style.height = 'auto';
-                  e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
-                }}
-                onKeyDown={handleKeyDown}
-                placeholder="Опиши действие или реплику... (Enter — с картинкой, Shift+Enter — перенос)"
-                rows={1}
-                className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none transition-colors resize-none scrollbar-thin"
-                disabled={state.isGenerating}
-              />
+          <div className="relative flex items-end gap-2 rounded-xl border border-gray-700 bg-gray-900/50 p-2 pr-[72px] focus-within:border-purple-500 transition-colors">
+            <textarea
+              ref={textareaRef}
+              value={inputText}
+              onChange={e => {
+                setInputText(e.target.value);
+                e.target.style.height = 'auto';
+                e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px';
+              }}
+              onKeyDown={handleKeyDown}
+              placeholder="Опиши действие или реплику... (Enter — с картинкой, Shift+Enter — перенос)"
+              rows={3}
+              className="w-full max-h-40 min-h-[72px] resize-none bg-transparent px-2 py-1.5 text-white placeholder-gray-500 focus:outline-none overflow-y-auto scrollbar-thin"
+              disabled={state.isGenerating}
+            />
+            {/* Кнопки отправки: сверху — с картинкой, снизу — только текст */}
+            <div className="absolute right-2 bottom-2 flex flex-col gap-2">
+              <button
+                onClick={() => handleSend(true)}
+                disabled={state.isGenerating || !inputText.trim()}
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-purple-600 text-white shadow-lg shadow-purple-600/20 transition-all hover:bg-purple-500 disabled:bg-gray-800 disabled:text-gray-600 disabled:shadow-none"
+                title="Отправить: Текст + Картинка (Enter)"
+                aria-label="Отправить с картинкой"
+              >
+                <ImagePlus size={16} />
+              </button>
+              <button
+                onClick={() => handleSend(false)}
+                disabled={state.isGenerating || !inputText.trim()}
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-700 text-gray-300 transition-all hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600"
+                title="Отправить: только текст (Shift+Enter)"
+                aria-label="Отправить только текст"
+              >
+                <Send size={15} />
+              </button>
             </div>
-            <button
-              onClick={() => handleSend(false)}
-              disabled={state.isGenerating || !inputText.trim()}
-              className="flex items-center gap-2 px-4 py-3 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 rounded-xl text-gray-300 text-sm transition-all whitespace-nowrap"
-              title="Только текст (Shift+Enter)"
-            >
-              💬 Текст
-            </button>
-            <button
-              onClick={() => handleSend(true)}
-              disabled={state.isGenerating || !inputText.trim()}
-              className="flex items-center gap-2 px-5 py-3 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-800 disabled:text-gray-600 rounded-xl text-white text-sm font-medium transition-all whitespace-nowrap shadow-lg shadow-purple-600/20"
-              title="Текст + Картинка (Enter)"
-            >
-              <ImagePlus size={16} />
-              Текст + Картинка
-            </button>
           </div>
         </div>
       </div>

@@ -14,7 +14,7 @@ else
     echo "   ⚠️  Ollama не отвечает. Запусти: ollama serve"
 fi
 
-COMFYUI_URL="${COMFYUI_URL:-http://192.168.1.107:1215}"
+COMFYUI_URL="${COMFYUI_URL:-http://localhost:1215}"
 echo "🎨 Проверка ComfyUI ($COMFYUI_URL)..."
 if curl -s "$COMFYUI_URL/system_stats" > /dev/null 2>&1; then
     echo "   ✅ ComfyUI работает"

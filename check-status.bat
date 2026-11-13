@@ -27,7 +27,7 @@ if errorlevel 1 (
 
 :: ComfyUI (адрес из backend\.env — по умолчанию см. README)
 set COMFYUI_OK=0
-powershell -Command "try { $r = Invoke-WebRequest -Uri 'http://192.168.1.107:1215/system_stats' -TimeoutSec 3 -UseBasicParsing; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+powershell -Command "try { $r = Invoke-WebRequest -Uri 'http://localhost:1215/system_stats' -TimeoutSec 3 -UseBasicParsing; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
 if errorlevel 1 (
     echo %RED%❌ ComfyUI:   НЕ ДОСТУПЕН (см. COMFYUI_URL в backend\.env)%RESET%
 ) else (

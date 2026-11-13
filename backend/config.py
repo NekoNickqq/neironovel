@@ -16,7 +16,7 @@ class Config:
     OLLAMA_API_MODEL = os.getenv("OLLAMA_API_MODEL", "qwen2.5:7b")
     
     # ComfyUI
-    COMFYUI_URL = os.getenv("COMFYUI_URL", "http://192.168.1.107:1215")
+    COMFYUI_URL = os.getenv("COMFYUI_URL", "http://localhost:1215")
     COMFYUI_WORKFLOW = os.getenv("COMFYUI_WORKFLOW", "workflow.json")
     COMFYUI_TIMEOUT = int(os.getenv("COMFYUI_TIMEOUT", "180"))
     
