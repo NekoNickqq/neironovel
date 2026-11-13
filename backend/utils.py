@@ -4,10 +4,7 @@ import random
 from typing import Any, Dict
 
 def clean_dict_keys(obj: Any) -> Any:
-    """
-    Рекурсивно очищает ключи словаря от пробелов в конце.
-    ComfyUI при экспорте workflow в API-формат добавляет пробелы в концах ключей.
-    """
+    """Рекурсивно очищает ключи словаря от пробелов в конце."""
     if isinstance(obj, dict):
         return {k.strip(): clean_dict_keys(v) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -16,15 +13,10 @@ def clean_dict_keys(obj: Any) -> Any:
         return obj
 
 def extract_json_from_text(text: str) -> dict:
-    """
-    Извлекает JSON из текста ответа Ollama.
-    Ollama иногда оборачивает JSON в markdown-блоки или добавляет лишний текст.
-    """
-    # Убираем markdown обёртку
+    """Извлекает JSON из текста ответа Ollama."""
     text = re.sub(r'^```json\s*', '', text.strip())
     text = re.sub(r'\s*```$', '', text.strip())
     
-    # Ищем первый { и последний }
     start = text.find('{')
     end = text.rfind('}')
     
@@ -36,8 +28,6 @@ def extract_json_from_text(text: str) -> dict:
     try:
         return json.loads(json_str)
     except json.JSONDecodeError as e:
-        # Попробуем починить частые проблемы
-        # Заменить одинарные кавычки на двойные
         json_str = json_str.replace("'", '"')
         try:
             return json.loads(json_str)
@@ -49,9 +39,8 @@ def generate_seed() -> int:
     return random.randint(0, 2**32 - 1)
 
 def build_system_prompt(world_lore: str, character_cards: list, style_preset: str, ai_controls_user: bool) -> str:
-    """
-    Формирует системный промпт для Ollama.
-    """
+    """Формирует системный промпт для Ollama с улучшенными правилами визуализации."""
+    
     chars_text = ""
     for char in character_cards:
         chars_text += f"- {char['name']}: {char['description']}\n"
@@ -61,10 +50,10 @@ def build_system_prompt(world_lore: str, character_cards: list, style_preset: st
         user_instruction = """
 ВАЖНО: Ты можешь переписывать реплики пользователя в более литературной форме.
 Если пользователь написал простое действие, преврати его в художественное описание.
-В блоках с speaker: "user" сохраняй оригинальный смысл, но улучшай форму.
 """
     
-    prompt = f"""Ты отыгрываешь роли в интерактивной визуальной новелле.
+    prompt = f"""Ты — мастер интерактивных визуальных новелл и опытный промпт-инженер для нейросетей-художников (Stable Diffusion).
+Твоя задача: вести повествование и генерировать точные визуальные промпты (image_prompt) на английском языке для каждой сцены.
 
 КОНТЕКСТ МИРА:
 {world_lore}
@@ -74,25 +63,30 @@ def build_system_prompt(world_lore: str, character_cards: list, style_preset: st
 
 СТИЛЬ ИЗОБРАЖЕНИЙ: {style_preset}
 {user_instruction}
-ПРАВИЛА:
-1. Отвечай СТРОГО в формате JSON (без markdown, без пояснений до и после).
-2. Массив blocks должен содержать реплики персонажей и описания narrатива.
+ПРАВИЛА НАРРАТИВА (для поля blocks):
+1. Отвечай СТРОГО в формате JSON (без markdown, без пояснений).
+2. Массив blocks содержит реплики персонажей и описания нарратива.
 3. speaker может быть: "narrator", "hero", "sidekick", "user".
 4. narrator описывает окружение, действия, атмосферу (используй *звёздочки* для действий).
-5. image_prompt — детальное визуальное описание сцены на английском для генерации картинки.
-6. В image_prompt обязательно добавь стиль: {style_preset}
-7. Отвечай на языке пользователя (обычно русский).
 
-ФОРМАТ ОТВЕТА:
+КРИТИЧЕСКИЕ ПРАВИЛА ДЛЯ IMAGE_PROMPT (нейросеть-художник не знает контекста, она видит только этот промпт):
+1. Язык: Английский. 
+2. НИКАКИХ ИМЁН: В промпте запрещено использовать имена (Каэль, Лира). Заменяй их на детальное описание внешности из карточек персонажей (например: "silver-haired dark mage in black cloak", "elven archer with green eyes").
+3. ФОКУС НА ДЕЙСТВИИ: Если в сцене персонаж совершает какое-то действие, и нет других действующих лиц, он ОБЯЗАТЕЛЬНО должен присутствовать в промпте.
+4. ФОКУС НА ОБЪЕКТЕ: Если действие завязано на предмете (держит меч, смотрит на кристалл, читает книгу), этот объект ОБЯЗАТЕЛЬНО должен быть детально описан в промпте.
+5. ИЗМЕНЕНИЕ СОСТОЯНИЯ: Учитывай текущее состояние персонажа! Если персонаж снял футболку, в промпте должно быть "shirtless" (без футболки) или "taking off shirt" (в процессе снятия). Нельзя рисовать его в футболке, если в тексте он её снял.
+6. ВЗГЛЯД ПОЛЬЗОВАТЕЛЯ (POV): Если пользователь (hero) на что-то смотрит, изучает или осматривает, старайся показать это крупным планом (например: "close-up on ancient runes", "focus on glowing crystal in hands").
+7. ПРЕЕМСТВЕННОСТЬ: Если персонаж или важная деталь появились в истории ранее и всё ещё уместны в сцене, упоминай их в промпте, чтобы сохранить консистентность.
+8. СТИЛЬ: В самом конце промпта ОБЯЗАТЕЛЬНО добавляй стиль: {style_preset}.
+
+ФОРМАТ ОТВЕТА (строго JSON):
 {{
   "blocks": [
     {{"speaker": "narrator", "text": "*описание сцены*"}},
-    {{"speaker": "hero", "text": "Реплика героя"}},
-    {{"speaker": "sidekick", "text": "Реплика спутника"}}
+    {{"speaker": "hero", "text": "Реплика героя"}}
   ],
-  "image_prompt": "detailed visual scene description in English, characters, poses, lighting, environment, {style_preset}"
+  "image_prompt": "detailed visual scene description in English, characters, poses, lighting, environment, close-up if needed, {style_preset}"
 }}"""
-    
     return prompt
 
 def build_avatar_prompt(character_description: str) -> str:

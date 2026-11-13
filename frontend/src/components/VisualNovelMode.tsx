@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, KeyboardEvent } from 'react';
 import { useApp } from '../store';
-import { RefreshCw, Eye, EyeOff, ImagePlus, MessageSquare } from 'lucide-react';
+import { RefreshCw, Eye, EyeOff, ImagePlus, MessageSquare, Sparkles } from 'lucide-react';
 import { TextBlock } from '../types';
 import { SceneImage } from './SceneImage';
 
@@ -177,15 +177,27 @@ export function VisualNovelMode() {
           >
             <MessageSquare size={18} />
           </button>
-          {currentMessage.role === 'assistant' && (
+                    {currentMessage.role === 'assistant' && (
             <>
+              {/* Быстрая генерация (тот же промпт) */}
               <button
-                onClick={() => regenerateImage(currentMessage.id)}
+                onClick={() => regenerateImage(currentMessage.id, 'same')}
                 className="p-3 bg-black/50 hover:bg-black/70 backdrop-blur rounded-full text-white transition-all"
-                title="Перегенерировать картинку"
+                title="Ещё вариант (тот же промпт)"
               >
                 <ImagePlus size={18} />
               </button>
+
+              {/* Новая генерация (через LLM) */}
+              <button
+                onClick={() => regenerateImage(currentMessage.id, 'new')}
+                className="p-3 bg-black/50 hover:bg-black/70 backdrop-blur rounded-full text-white transition-all"
+                title="Новый промпт через LLM"
+              >
+                <Sparkles size={18} />
+              </button>
+
+              {/* Перегенерация текста */}
               <button
                 onClick={() => regenerateText(currentMessage.id)}
                 className="p-3 bg-black/50 hover:bg-black/70 backdrop-blur rounded-full text-white transition-all"

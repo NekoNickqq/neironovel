@@ -12,142 +12,84 @@ class ComfyUIClient:
         self.workflow_path = config.COMFYUI_WORKFLOW
         self.timeout = config.COMFYUI_TIMEOUT
         self.gallery_path = config.GALLERY_PATH
-        
-        # Загружаем workflow
         self.workflow = self._load_workflow()
     
     def _load_workflow(self) -> dict:
-        """Загружает и очищает workflow от пробелов в ключах"""
         try:
             with open(self.workflow_path, 'r', encoding='utf-8') as f:
                 workflow = json.load(f)
             return clean_dict_keys(workflow)
-        except FileNotFoundError:
-            raise Exception(f"Workflow file not found: {self.workflow_path}")
-        except json.JSONDecodeError as e:
-            raise Exception(f"Invalid workflow JSON: {e}")
+        except Exception as e:
+            raise Exception(f"Workflow load error: {e}")
     
-    async def generate_image(self, prompt: str, seed: Optional[int] = None) -> str:
-        """
-        Генерирует изображение через ComfyUI.
-        
-        Args:
-            prompt: Позитивный промпт для генерации
-            seed: Seed для воспроизводимости (если None — генерируется случайно)
-        
-        Returns:
-            Путь к сохранённому изображению
-        """
-        # Создаём копию workflow
+    async def generate_image(self, prompt: str, seed: Optional[int] = None) -> dict:
         workflow = json.loads(json.dumps(self.workflow))
+        if "21" in workflow: workflow["21"]["inputs"]["text"] = prompt
+        used_seed = seed or generate_seed()
+        if "99" in workflow: workflow["99"]["inputs"]["seed"] = used_seed
         
-        # Подставляем промпт в узел "21" (positive CLIPTextEncode)
-        if "21" in workflow:
-            workflow["21"]["inputs"]["text"] = prompt
-        
-        # Рандомизируем seed в узле "99" (KSampler)
-        if "99" in workflow:
-            workflow["99"]["inputs"]["seed"] = seed or generate_seed()
-        
-        # Отправляем запрос на генерацию
         async with httpx.AsyncClient(timeout=30) as client:
             try:
-                # Queue prompt
-                response = await client.post(
-                    f"{self.url}/prompt",
-                    json={"prompt": workflow}
-                )
+                response = await client.post(f"{self.url}/prompt", json={"prompt": workflow})
                 response.raise_for_status()
-                result = response.json()
-                prompt_id = result.get("prompt_id")
+                prompt_id = response.json().get("prompt_id")
+                if not prompt_id: raise Exception("No prompt_id in response")
                 
-                if not prompt_id:
-                    raise Exception("No prompt_id in response")
-                
-                # Poll for completion
                 image_path = await self._wait_for_completion(prompt_id)
-                return image_path
-                
-            except httpx.TimeoutException:
-                raise Exception(f"ComfyUI timeout after {self.timeout}s")
+                return {"image_path": image_path, "prompt_id": prompt_id, "seed": used_seed}
             except httpx.HTTPError as e:
                 raise Exception(f"ComfyUI HTTP error: {e}")
+
+    async def interrupt(self):
+        """Посылает сигнал в ComfyUI прервать текущую генерацию"""
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                await client.post(f"{self.url}/interrupt")
+        except Exception as e:
+            print(f"Failed to interrupt ComfyUI: {e}")
     
     async def _wait_for_completion(self, prompt_id: str) -> str:
-        """Ожидает завершения генерации и возвращает путь к изображению"""
         start_time = asyncio.get_event_loop().time()
-        
         async with httpx.AsyncClient(timeout=10) as client:
             while True:
-                # Проверяем таймаут
-                elapsed = asyncio.get_event_loop().time() - start_time
-                if elapsed > self.timeout:
+                if asyncio.get_event_loop().time() - start_time > self.timeout:
                     raise Exception(f"Generation timeout after {self.timeout}s")
                 
-                # Запрашиваем историю
                 try:
                     response = await client.get(f"{self.url}/history/{prompt_id}")
                     if response.status_code == 200:
                         data = response.json()
-                        
                         if prompt_id in data:
-                            history = data[prompt_id]
-                            outputs = history.get("outputs", {})
-                            
-                            # Ищем узел с изображениями (обычно "33" - PreviewImage)
+                            outputs = data[prompt_id].get("outputs", {})
                             for node_id, node_output in outputs.items():
                                 if "images" in node_output:
                                     images = node_output["images"]
                                     if images:
                                         img_info = images[0]
-                                        filename = img_info["filename"]
-                                        img_type = img_info.get("type", "output")
-                                        subfolder = img_info.get("subfolder", "")
-                                        
-                                        # Скачиваем изображение
-                                        image_data = await self._download_image(filename, img_type, subfolder)
-                                        
-                                        # Сохраняем в gallery
-                                        saved_path = await self._save_image(image_data, prompt_id)
-                                        return saved_path
-                
-                except httpx.HTTPError:
-                    pass  # Продолжаем опрос
-                
-                # Ждём 1 секунду перед следующим опросом
+                                        image_data = await self._download_image(img_info["filename"], img_info.get("type", "output"), img_info.get("subfolder", ""))
+                                        return await self._save_image(image_data, prompt_id)
+                except httpx.HTTPError: pass
                 await asyncio.sleep(1)
     
     async def _download_image(self, filename: str, img_type: str, subfolder: str) -> bytes:
-        """Скачивает изображение из ComfyUI"""
         async with httpx.AsyncClient(timeout=30) as client:
-            params = {
-                "filename": filename,
-                "type": img_type,
-                "subfolder": subfolder
-            }
+            params = {"filename": filename, "type": img_type, "subfolder": subfolder}
             response = await client.get(f"{self.url}/view", params=params)
             response.raise_for_status()
             return response.content
     
     async def _save_image(self, image_data: bytes, prompt_id: str) -> str:
-        """Сохраняет изображение в gallery"""
         os.makedirs(self.gallery_path, exist_ok=True)
         filename = f"scene_{prompt_id}.png"
         filepath = os.path.join(self.gallery_path, filename)
-        
-        with open(filepath, 'wb') as f:
-            f.write(image_data)
-        
-        # Возвращаем относительный путь для фронтенда
+        with open(filepath, 'wb') as f: f.write(image_data)
         return f"/gallery/{filename}"
     
     async def is_available(self) -> bool:
-        """Проверяет доступность ComfyUI"""
         try:
             async with httpx.AsyncClient(timeout=5) as client:
                 response = await client.get(f"{self.url}/system_stats")
                 return response.status_code == 200
-        except:
-            return False
+        except Exception: return False
 
 comfyui_client = ComfyUIClient()

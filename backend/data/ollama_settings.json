@@ -1,0 +1,8 @@
+{
+  "mode": "local",
+  "ollama_url": "http://localhost:11434",
+  "api_base_url": "https://ollama.com",
+  "api_key": "",
+  "model_local": "huihui_ai/gemma-4-abliterated:12b",
+  "model_api": "qwen2.5:7b"
+}

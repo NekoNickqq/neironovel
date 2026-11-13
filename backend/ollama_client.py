@@ -1,43 +1,25 @@
 import httpx
 import json
+import asyncio
 from typing import List, Dict, Optional
 from config import config
 from ollama_settings import ollama_settings
-from utils import extract_json_from_text, build_system_prompt
-
+from utils import extract_json_from_text
 
 class OllamaClient:
-    """
-    Клиент Ollama с поддержкой двух режимов подключения:
-      - local: локальный сервер Ollama (нативный /api/chat, список моделей из /api/tags)
-      - api:   внешнее OpenAI-совместимое API с авторизацией по API-ключу
-               (chat/completions, Bearer token)
-    Модель, URL и ключ берутся из ollama_settings (можно менять через API без рестарта).
-    """
-
     def __init__(self):
-        # Статические параметры генерации (из .env)
         self.timeout = config.OLLAMA_TIMEOUT
         self.temperature = config.OLLAMA_TEMPERATURE
         self.top_p = config.OLLAMA_TOP_P
 
-    # ---------- Вспомогательные свойства ----------
-
     @property
-    def mode(self) -> str:
-        return ollama_settings.mode
-
+    def mode(self) -> str: return ollama_settings.mode
     @property
-    def url(self) -> str:
-        return ollama_settings.base_url
-
+    def url(self) -> str: return ollama_settings.base_url
     @property
-    def model(self) -> str:
-        return ollama_settings.model
-
+    def model(self) -> str: return ollama_settings.model
     @property
-    def api_key(self) -> str:
-        return ollama_settings.api_key
+    def api_key(self) -> str: return ollama_settings.api_key
 
     def _headers(self) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -45,175 +27,127 @@ class OllamaClient:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
-    # ---------- Основной метод ----------
+    def _check_loop(self, text: str) -> bool:
+        """Проверяет, не началось ли зацикливание (повторение текста)"""
+        if len(text) < 300:
+            return False
+        # Берем последние 100 символов
+        chunk = text[-100:]
+        # Если этот же кусок был 200 символов назад и 300 символов назад — это цикл
+        if text[-200:-100] == chunk and text[-300:-200] == chunk:
+            return True
+        return False
 
-    async def chat(
-        self,
-        messages: List[Dict[str, str]],
-        system_prompt: str,
-        temperature: Optional[float] = None,
-        top_p: Optional[float] = None,
-        model: Optional[str] = None,
-    ) -> Dict:
-        """
-        Отправляет запрос в Ollama (локально или через внешний API)
-        и возвращает распарсенный JSON ответ.
-
-        Args:
-            messages: История диалога [{role, content}]
-            system_prompt: Системный промпт
-            temperature: Температура генерации
-            top_p: Top-p параметр
-            model: Необязательное переопределение модели для этого запроса
-
-        Returns:
-            Dict с полями blocks и image_prompt
-        """
-        full_messages = [
-            {"role": "system", "content": system_prompt}
-        ] + messages
-
+    async def chat(self, messages: List[Dict[str, str]], system_prompt: str, temperature: Optional[float] = None, top_p: Optional[float] = None, model: Optional[str] = None) -> Dict:
+        full_messages = [{"role": "system", "content": system_prompt}] + messages
         use_model = model or self.model
-        options = {
-            "temperature": temperature or self.temperature,
-            "top_p": top_p or self.top_p,
-        }
+        options = {"temperature": temperature or self.temperature, "top_p": top_p or self.top_p}
+
+        thinking_text = ""
+        content = ""
 
         if self.mode == "api":
             content = await self._chat_openai_compatible(full_messages, use_model, options)
         else:
-            content = await self._chat_native(full_messages, use_model, options)
+            content, thinking_text = await self._chat_native_stream(full_messages, use_model, options)
 
         try:
-            # Парсим JSON из ответа
             parsed = extract_json_from_text(content)
         except Exception as e:
-            raise Exception(f"Ollama error: {e}")
-
-        # Валидация структуры. Используем .get(...) or ..., чтобы ловить
-        # не только отсутствующее поле, но и пустое (None / ""), иначе
-        # последующие ответы модели без image_prompt оставались бы без картинки.
+            # Если парсинг не удался (например, оборвалось из-за цикла), возвращаем сырой текст
+            parsed = {"blocks": [{"speaker": "narrator", "text": content}], "image_prompt": ""}
+            
         if not parsed.get("blocks"):
             parsed["blocks"] = [{"speaker": "narrator", "text": content}]
 
         image_prompt = parsed.get("image_prompt") or ""
-        if isinstance(image_prompt, dict):  # модель иногда вложенный объект возвращает
-            image_prompt = image_prompt.get("prompt", "") or ""
+        if isinstance(image_prompt, dict): image_prompt = image_prompt.get("prompt", "") or ""
         parsed["image_prompt"] = str(image_prompt).strip()
 
-        return parsed
+        return {"parsed": parsed, "raw": content, "thinking": thinking_text}
 
-    async def _chat_native(
-        self,
-        full_messages: List[Dict[str, str]],
-        model: str,
-        options: Dict,
-    ) -> str:
-        """Запрос к нативному API локального Ollama (/api/chat)."""
+    async def _chat_native_stream(self, full_messages: List[Dict[str, str]], model: str, options: Dict) -> tuple[str, str]:
         payload = {
             "model": model,
             "messages": full_messages,
-            "stream": False,
+            "stream": True, # ВКЛЮЧАЕМ СТРИМИНГ ДЛЯ ДЕТЕКЦИИ ЦИКЛОВ
             "format": "json",
             "options": options,
         }
 
+        content = ""
+        thinking = ""
+
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
-                response = await client.post(
-                    f"{self.url}/api/chat",
-                    json=payload,
-                    headers=self._headers(),
-                )
-                response.raise_for_status()
-                data = response.json()
-                return data.get("message", {}).get("content", "")
+                async with client.stream("POST", f"{self.url}/api/chat", json=payload, headers=self._headers()) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line: continue
+                        data = json.loads(line)
+                        msg = data.get("message", {})
+                        
+                        # Собираем thinking (если есть)
+                        if msg.get("thinking"):
+                            thinking += msg["thinking"]
+                        
+                        # Собираем контент
+                        if msg.get("content"):
+                            content += msg["content"]
+                            # ПРОВЕРКА НА ЗАЦИКЛИВАНИЕ
+                            if self._check_loop(content):
+                                print("⚠️ Loop detected in Ollama! Aborting generation.")
+                                # Принудительно рвем соединение
+                                await response.aclose()
+                                raise Exception("Model generation loop detected. Aborted.")
+                        
+                        if data.get("done"):
+                            break
+                return content, thinking
             except httpx.TimeoutException:
                 raise Exception(f"Ollama timeout after {self.timeout}s")
             except httpx.HTTPError as e:
                 raise Exception(f"Ollama HTTP error: {e}")
 
-    async def _chat_openai_compatible(
-        self,
-        full_messages: List[Dict[str, str]],
-        model: str,
-        options: Dict,
-    ) -> str:
-        """Запрос к OpenAI-совместимому API (chat/completions) с API-ключом."""
-        if not self.api_key:
-            raise Exception("API key is not set for external Ollama API mode")
-
+    async def _chat_openai_compatible(self, full_messages, model, options) -> str:
+        # Оставляем без изменений (стриминг для API не критичен для локальных нужд)
+        if not self.api_key: raise Exception("API key is not set")
         payload = {
-            "model": model,
-            "messages": full_messages,
-            "stream": False,
-            "response_format": {"type": "json_object"},
-            "temperature": options.get("temperature"),
-            "top_p": options.get("top_p"),
+            "model": model, "messages": full_messages, "stream": False,
+            "response_format": {"type": "json_object"}, "temperature": options.get("temperature"), "top_p": options.get("top_p"),
         }
-
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
-                response = await client.post(
-                    f"{self.url}/v1/chat/completions",
-                    json=payload,
-                    headers=self._headers(),
-                )
+                response = await client.post(f"{self.url}/v1/chat/completions", json=payload, headers=self._headers())
                 response.raise_for_status()
                 data = response.json()
-                choices = data.get("choices", [])
-                if not choices:
-                    raise Exception("Empty response from API")
-                return choices[0].get("message", {}).get("content", "")
-            except httpx.TimeoutException:
-                raise Exception(f"Ollama API timeout after {self.timeout}s")
-            except httpx.HTTPStatusError as e:
-                body = ""
-                try:
-                    body = e.response.text[:300]
-                except Exception:
-                    pass
-                raise Exception(f"Ollama API HTTP error: {e} {body}")
+                return data.get("choices", [{}])[0].get("message", {}).get("content", "")
             except httpx.HTTPError as e:
                 raise Exception(f"Ollama API HTTP error: {e}")
 
-    # ---------- Service discovery ----------
-
     async def is_available(self) -> bool:
-        """Проверяет доступность активного подключения к Ollama."""
         try:
             async with httpx.AsyncClient(timeout=5) as client:
                 if self.mode == "api":
-                    if not self.api_key:
-                        return False
-                    response = await client.get(
-                        f"{self.url}/v1/models", headers=self._headers()
-                    )
+                    if not self.api_key: return False
+                    response = await client.get(f"{self.url}/v1/models", headers=self._headers())
                     return response.status_code == 200
                 else:
                     response = await client.get(f"{self.url}/api/tags")
                     return response.status_code == 200
-        except Exception:
-            return False
+        except Exception: return False
 
     async def list_models(self) -> List[str]:
-        """Возвращает список доступных моделей активного подключения."""
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 if self.mode == "api":
-                    response = await client.get(
-                        f"{self.url}/v1/models", headers=self._headers()
-                    )
+                    response = await client.get(f"{self.url}/v1/models", headers=self._headers())
                     response.raise_for_status()
-                    data = response.json()
-                    return sorted(m["id"] for m in data.get("data", []) if "id" in m)
+                    return sorted(m["id"] for m in response.json().get("data", []) if "id" in m)
                 else:
                     response = await client.get(f"{self.url}/api/tags")
                     response.raise_for_status()
-                    data = response.json()
-                    return [m["name"] for m in data.get("models", [])]
-        except Exception:
-            return []
-
+                    return [m["name"] for m in response.json().get("models", [])]
+        except Exception: return []
 
 ollama_client = OllamaClient()

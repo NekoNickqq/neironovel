@@ -1,126 +1,65 @@
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useReducer,
-  ReactNode,
-} from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useReducer, ReactNode, useRef } from 'react';
 import { Dialogue, Message, TextBlock, AppView } from './types';
 import { api, ApiError, OllamaMode } from './api';
 
 interface AppState {
-  dialogues: Dialogue[];
-  currentDialogueId: string | null;
-  currentView: AppView;
-  isGenerating: boolean;
-  isLoadingList: boolean;
-  novelModeHidden: boolean;
-  apiError: string | null;
-  services: { ollama: boolean; comfyui: boolean } | null;
-  ollamaMode: OllamaMode;
-  ollamaModels: string[];
-  selectedOllamaModel: string | null; // null = использовать модель по умолчанию из настроек
+  dialogues: Dialogue[]; currentDialogueId: string | null; currentView: AppView; isGenerating: boolean; isLoadingList: boolean;
+  novelModeHidden: boolean; apiError: string | null; services: { ollama: boolean; comfyui: boolean } | null;
+  ollamaMode: OllamaMode; ollamaModels: string[]; selectedOllamaModel: string | null;
 }
 
 type Action =
-  | { type: 'SET_VIEW'; payload: AppView }
-  | { type: 'SET_DIALOGUES'; payload: Dialogue[] }
-  | { type: 'UPSERT_DIALOGUE'; payload: Dialogue }
-  | { type: 'SELECT_DIALOGUE'; payload: string }
-  | { type: 'SET_GENERATING'; payload: boolean }
-  | { type: 'SET_LOADING_LIST'; payload: boolean }
-  | { type: 'SET_API_ERROR'; payload: string | null }
-  | { type: 'SET_SERVICES'; payload: { ollama: boolean; comfyui: boolean } | null }
+  | { type: 'SET_VIEW'; payload: AppView } | { type: 'SET_DIALOGUES'; payload: Dialogue[] }
+  | { type: 'UPSERT_DIALOGUE'; payload: Dialogue } | { type: 'SELECT_DIALOGUE'; payload: string }
+  | { type: 'SET_GENERATING'; payload: boolean } | { type: 'SET_LOADING_LIST'; payload: boolean }
+  | { type: 'SET_API_ERROR'; payload: string | null } | { type: 'SET_SERVICES'; payload: { ollama: boolean; comfyui: boolean } | null }
   | { type: 'SET_OLLAMA_INFO'; payload: { mode: OllamaMode; models: string[]; current: string } }
-  | { type: 'SET_SELECTED_OLLAMA_MODEL'; payload: string | null }
-  | { type: 'TOGGLE_NOVEL_HIDDEN' }
+  | { type: 'SET_SELECTED_OLLAMA_MODEL'; payload: string | null } | { type: 'TOGGLE_NOVEL_HIDDEN' }
   | { type: 'SELECT_IMAGE'; payload: { messageId: string; index: number } }
-  | { type: 'SELECT_TEXT_VERSION'; payload: { messageId: string; index: number } }
-  | { type: 'DELETE_DIALOGUE'; payload: string };
+  | { type: 'SELECT_TEXT_VERSION'; payload: { messageId: string; index: number } } | { type: 'DELETE_DIALOGUE'; payload: string };
 
 const initialState: AppState = {
-  dialogues: [],
-  currentDialogueId: null,
-  currentView: 'list',
-  isGenerating: false,
-  isLoadingList: true,
-  novelModeHidden: false,
-  apiError: null,
-  services: null,
-  ollamaMode: 'local',
-  ollamaModels: [],
-  selectedOllamaModel: null,
+  dialogues: [], currentDialogueId: null, currentView: 'list', isGenerating: false, isLoadingList: true,
+  novelModeHidden: false, apiError: null, services: null, ollamaMode: 'local', ollamaModels: [], selectedOllamaModel: null,
 };
 
 function upsertDialogueList(dialogues: Dialogue[], dialogue: Dialogue): Dialogue[] {
   const idx = dialogues.findIndex(d => d.id === dialogue.id);
   if (idx === -1) return [...dialogues, dialogue];
-  const next = [...dialogues];
-  next[idx] = dialogue;
-  return next;
+  const next = [...dialogues]; next[idx] = dialogue; return next;
 }
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
-    case 'SET_VIEW':
-      return { ...state, currentView: action.payload };
-    case 'SET_DIALOGUES':
-      return { ...state, dialogues: action.payload };
-    case 'UPSERT_DIALOGUE':
-      return { ...state, dialogues: upsertDialogueList(state.dialogues, action.payload) };
-    case 'SELECT_DIALOGUE':
-      return { ...state, currentDialogueId: action.payload };
-    case 'SET_GENERATING':
-      return { ...state, isGenerating: action.payload };
-    case 'SET_LOADING_LIST':
-      return { ...state, isLoadingList: action.payload };
-    case 'SET_API_ERROR':
-      return { ...state, apiError: action.payload };
-    case 'SET_SERVICES':
-      return { ...state, services: action.payload };
+    case 'SET_VIEW': return { ...state, currentView: action.payload };
+    case 'SET_DIALOGUES': return { ...state, dialogues: action.payload };
+    case 'UPSERT_DIALOGUE': return { ...state, dialogues: upsertDialogueList(state.dialogues, action.payload) };
+    case 'SELECT_DIALOGUE': return { ...state, currentDialogueId: action.payload };
+    case 'SET_GENERATING': return { ...state, isGenerating: action.payload };
+    case 'SET_LOADING_LIST': return { ...state, isLoadingList: action.payload };
+    case 'SET_API_ERROR': return { ...state, apiError: action.payload };
+    case 'SET_SERVICES': return { ...state, services: action.payload };
     case 'SET_OLLAMA_INFO': {
       const { mode, models, current } = action.payload;
-      const selected =
-        state.selectedOllamaModel && models.includes(state.selectedOllamaModel)
-          ? state.selectedOllamaModel
-          : current || null;
+      const selected = state.selectedOllamaModel && models.includes(state.selectedOllamaModel) ? state.selectedOllamaModel : current || null;
       return { ...state, ollamaMode: mode, ollamaModels: models, selectedOllamaModel: selected };
     }
-    case 'SET_SELECTED_OLLAMA_MODEL':
-      return { ...state, selectedOllamaModel: action.payload };
-    case 'TOGGLE_NOVEL_HIDDEN':
-      return { ...state, novelModeHidden: !state.novelModeHidden };
+    case 'SET_SELECTED_OLLAMA_MODEL': return { ...state, selectedOllamaModel: action.payload };
+    case 'TOGGLE_NOVEL_HIDDEN': return { ...state, novelModeHidden: !state.novelModeHidden };
     case 'SELECT_IMAGE': {
-      const dialogues = state.dialogues.map(d => ({
-        ...d,
-        messages: d.messages.map(m =>
-          m.id === action.payload.messageId
-            ? { ...m, selected_image_index: action.payload.index }
-            : m,
-        ),
-      }));
+      const dialogues = state.dialogues.map(d => ({ ...d, messages: d.messages.map(m => m.id === action.payload.messageId ? { ...m, selected_image_index: action.payload.index } : m) }));
       return { ...state, dialogues };
     }
     case 'SELECT_TEXT_VERSION': {
-      const dialogues = state.dialogues.map(d => ({
-        ...d,
-        messages: d.messages.map(m =>
-          m.id === action.payload.messageId
-            ? { ...m, selected_version_index: action.payload.index }
-            : m,
-        ),
-      }));
+      const dialogues = state.dialogues.map(d => ({ ...d, messages: d.messages.map(m => m.id === action.payload.messageId ? { ...m, selected_version_index: action.payload.index } : m) }));
       return { ...state, dialogues };
     }
     case 'DELETE_DIALOGUE': {
       const dialogues = state.dialogues.filter(d => d.id !== action.payload);
-      const currentDialogueId =
-        state.currentDialogueId === action.payload ? null : state.currentDialogueId;
+      const currentDialogueId = state.currentDialogueId === action.payload ? null : state.currentDialogueId;
       return { ...state, dialogues, currentDialogueId };
     }
-    default:
-      return state;
+    default: return state;
   }
 }
 
@@ -136,18 +75,13 @@ interface AppContextType {
   currentDialogue: Dialogue | null;
   refreshDialogueList: () => Promise<void>;
   openDialogue: (id: string) => Promise<void>;
-  createDialogue: (payload: {
-    title: string;
-    description: string;
-    world_lore: string;
-    character_cards: Dialogue['settings']['character_cards'];
-    style_preset: string;
-    ai_controls_user: boolean;
-  }) => Promise<void>;
+  createDialogue: (payload: { title: string; description: string; world_lore: string; character_cards: Dialogue['settings']['character_cards']; style_preset: string; ai_controls_user: boolean; }) => Promise<void>;
   deleteDialogue: (id: string) => Promise<void>;
+  updateDialogueSettings: (payload: { world_lore?: string; character_cards?: any[]; style_preset?: string }) => Promise<void>;
   sendMessage: (text: string, generateImage: boolean) => Promise<void>;
+  stopGeneration: () => void;
   regenerateText: (messageId: string, model?: string | null) => Promise<void>;
-  regenerateImage: (messageId: string, model?: string | null) => Promise<void>;
+  regenerateImage: (messageId: string, mode?: 'same' | 'new', model?: string | null) => Promise<void>;
   selectImage: (messageId: string, index: number) => Promise<void>;
   selectTextVersion: (messageId: string, index: number) => Promise<void>;
   refreshOllamaModels: () => Promise<void>;
@@ -158,9 +92,8 @@ const AppContext = createContext<AppContextType | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
-
-  const currentDialogue =
-    state.dialogues.find(d => d.id === state.currentDialogueId) ?? null;
+  const currentDialogue = state.dialogues.find(d => d.id === state.currentDialogueId) ?? null;
+  const abortControllerRef = useRef<AbortController | null>(null); // ССЫЛКА НА ОТМЕНУ
 
   const refreshDialogueList = useCallback(async () => {
     dispatch({ type: 'SET_LOADING_LIST', payload: true });
@@ -168,40 +101,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const list = await api.listDialogues();
       dispatch({ type: 'SET_DIALOGUES', payload: list });
       dispatch({ type: 'SET_API_ERROR', payload: null });
-    } catch (err) {
-      dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
-    } finally {
-      dispatch({ type: 'SET_LOADING_LIST', payload: false });
-    }
+    } catch (err) { dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) }); } finally { dispatch({ type: 'SET_LOADING_LIST', payload: false }); }
   }, []);
 
   const refreshHealth = useCallback(async () => {
-    try {
-      const health = await api.health();
-      dispatch({ type: 'SET_SERVICES', payload: health.services });
-    } catch {
-      dispatch({ type: 'SET_SERVICES', payload: null });
-    }
+    try { const health = await api.health(); dispatch({ type: 'SET_SERVICES', payload: health.services }); } catch { dispatch({ type: 'SET_SERVICES', payload: null }); }
   }, []);
 
   const refreshOllamaModels = useCallback(async () => {
-    try {
-      const info = await api.listOllamaModels();
-      dispatch({ type: 'SET_OLLAMA_INFO', payload: info });
-    } catch {
-      /* ignore — сервер может быть недоступен */
-    }
+    try { const info = await api.listOllamaModels(); dispatch({ type: 'SET_OLLAMA_INFO', payload: info }); } catch { /* ignore */ }
   }, []);
 
-  const setSelectedOllamaModel = useCallback((model: string | null) => {
-    dispatch({ type: 'SET_SELECTED_OLLAMA_MODEL', payload: model });
-  }, []);
+  const setSelectedOllamaModel = useCallback((model: string | null) => { dispatch({ type: 'SET_SELECTED_OLLAMA_MODEL', payload: model }); }, []);
 
-  useEffect(() => {
-    void refreshDialogueList();
-    void refreshHealth();
-    void refreshOllamaModels();
-  }, [refreshDialogueList, refreshHealth, refreshOllamaModels]);
+  useEffect(() => { void refreshDialogueList(); void refreshHealth(); void refreshOllamaModels(); }, [refreshDialogueList, refreshHealth, refreshOllamaModels]);
 
   const openDialogue = useCallback(async (id: string) => {
     try {
@@ -209,53 +122,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'UPSERT_DIALOGUE', payload: dialogue });
       dispatch({ type: 'SELECT_DIALOGUE', payload: id });
       dispatch({ type: 'SET_API_ERROR', payload: null });
-    } catch (err) {
-      dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
-      throw err;
-    }
+    } catch (err) { dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) }); throw err; }
   }, []);
 
-  const createDialogue = useCallback(
-    async (payload: {
-      title: string;
-      description: string;
-      world_lore: string;
-      character_cards: Dialogue['settings']['character_cards'];
-      style_preset: string;
-      ai_controls_user: boolean;
-    }) => {
-      const lore = payload.world_lore.trim()
-        ? payload.world_lore
-        : payload.description;
-      try {
-        const dialogue = await api.createDialogue({
-          title: payload.title,
-          description: payload.description,
-          world_lore: lore,
-          character_cards: payload.character_cards,
-          style_preset: payload.style_preset,
-          ai_controls_user: payload.ai_controls_user,
-        });
-        dispatch({ type: 'UPSERT_DIALOGUE', payload: dialogue });
-        dispatch({ type: 'SELECT_DIALOGUE', payload: dialogue.id });
-        dispatch({ type: 'SET_VIEW', payload: 'chat' });
-        dispatch({ type: 'SET_API_ERROR', payload: null });
-      } catch (err) {
-        dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
-        throw err;
-      }
-    },
-    [],
-  );
+  const createDialogue = useCallback(async (payload: any) => {
+    const lore = payload.world_lore.trim() ? payload.world_lore : payload.description;
+    try {
+      const dialogue = await api.createDialogue({ ...payload, world_lore: lore });
+      dispatch({ type: 'UPSERT_DIALOGUE', payload: dialogue });
+      dispatch({ type: 'SELECT_DIALOGUE', payload: dialogue.id });
+      dispatch({ type: 'SET_VIEW', payload: 'chat' });
+      dispatch({ type: 'SET_API_ERROR', payload: null });
+    } catch (err) { dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) }); throw err; }
+  }, []);
 
   const deleteDialogue = useCallback(async (id: string) => {
-    try {
-      await api.deleteDialogue(id);
-      dispatch({ type: 'DELETE_DIALOGUE', payload: id });
-      dispatch({ type: 'SET_API_ERROR', payload: null });
-    } catch (err) {
-      dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
-    }
+    try { await api.deleteDialogue(id); dispatch({ type: 'DELETE_DIALOGUE', payload: id }); dispatch({ type: 'SET_API_ERROR', payload: null }); } catch (err) { dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) }); }
   }, []);
 
   const reloadCurrentDialogue = useCallback(async () => {
@@ -264,104 +146,75 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'UPSERT_DIALOGUE', payload: dialogue });
   }, [state.currentDialogueId]);
 
-  const sendMessage = useCallback(
-    async (text: string, generateImage: boolean) => {
-      if (!state.currentDialogueId) return;
-      dispatch({ type: 'SET_GENERATING', payload: true });
-      dispatch({ type: 'SET_API_ERROR', payload: null });
-      try {
-        await api.sendMessage(state.currentDialogueId, text, generateImage, state.selectedOllamaModel);
-        await reloadCurrentDialogue();
-      } catch (err) {
-        dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
-      } finally {
-        dispatch({ type: 'SET_GENERATING', payload: false });
-      }
-    },
-    [state.currentDialogueId, state.selectedOllamaModel, reloadCurrentDialogue],
-  );
+  const updateDialogueSettings = useCallback(async (payload: { world_lore?: string; character_cards?: any[]; style_preset?: string }) => {
+    if (!state.currentDialogueId) return;
+    try { await api.updateSettings(state.currentDialogueId, payload); await reloadCurrentDialogue(); dispatch({ type: 'SET_API_ERROR', payload: null }); } catch (err) { dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) }); }
+  }, [state.currentDialogueId, reloadCurrentDialogue]);
 
-  const regenerateText = useCallback(
-    async (messageId: string, model?: string | null) => {
-      if (!state.currentDialogueId) return;
-      dispatch({ type: 'SET_GENERATING', payload: true });
-      dispatch({ type: 'SET_API_ERROR', payload: null });
-      try {
-        await api.regenerateText(
-          state.currentDialogueId,
-          messageId,
-          model ?? state.selectedOllamaModel,
-        );
-        await reloadCurrentDialogue();
-      } catch (err) {
-        dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
-      } finally {
-        dispatch({ type: 'SET_GENERATING', payload: false });
-      }
-    },
-    [state.currentDialogueId, state.selectedOllamaModel, reloadCurrentDialogue],
-  );
+  // ОСТАНОВКА ГЕНЕРАЦИИ
+  const stopGeneration = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+  }, []);
 
-  const regenerateImage = useCallback(
-    async (messageId: string, model?: string | null) => {
-      if (!state.currentDialogueId) return;
-      dispatch({ type: 'SET_GENERATING', payload: true });
-      dispatch({ type: 'SET_API_ERROR', payload: null });
-      try {
-        await api.regenerateImage(
-          state.currentDialogueId,
-          messageId,
-          model ?? state.selectedOllamaModel,
-        );
+  const sendMessage = useCallback(async (text: string, generateImage: boolean) => {
+    if (!state.currentDialogueId) return;
+    
+    // Создаем новый контроллер для этого запроса
+    abortControllerRef.current = new AbortController();
+    
+    dispatch({ type: 'SET_GENERATING', payload: true });
+    dispatch({ type: 'SET_API_ERROR', payload: null });
+    try {
+      await api.sendMessage(state.currentDialogueId, text, generateImage, state.selectedOllamaModel, abortControllerRef.current.signal);
+      await reloadCurrentDialogue();
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        console.log('Генерация отменена пользователем');
+        // Даем бэкенду 1.5 сек, чтобы успеть сохранить статус "aborted"
+        await new Promise(r => setTimeout(r, 1500));
         await reloadCurrentDialogue();
-      } catch (err) {
+      } else {
         dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
-      } finally {
-        dispatch({ type: 'SET_GENERATING', payload: false });
       }
-    },
-    [state.currentDialogueId, state.selectedOllamaModel, reloadCurrentDialogue],
-  );
+    } finally {
+      abortControllerRef.current = null;
+      dispatch({ type: 'SET_GENERATING', payload: false });
+    }
+  }, [state.currentDialogueId, state.selectedOllamaModel, reloadCurrentDialogue]);
+
+  const regenerateText = useCallback(async (messageId: string, model?: string | null) => {
+    if (!state.currentDialogueId) return;
+    dispatch({ type: 'SET_GENERATING', payload: true });
+    dispatch({ type: 'SET_API_ERROR', payload: null });
+    try { await api.regenerateText(state.currentDialogueId, messageId, model ?? state.selectedOllamaModel); await reloadCurrentDialogue(); } catch (err) { dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) }); } finally { dispatch({ type: 'SET_GENERATING', payload: false }); }
+  }, [state.currentDialogueId, state.selectedOllamaModel, reloadCurrentDialogue]);
+
+  const regenerateImage = useCallback(async (messageId: string, mode: 'same' | 'new' = 'same', model?: string | null) => {
+    if (!state.currentDialogueId) return;
+    dispatch({ type: 'SET_GENERATING', payload: true });
+    dispatch({ type: 'SET_API_ERROR', payload: null });
+    try { await api.regenerateImage(state.currentDialogueId, messageId, mode, model ?? state.selectedOllamaModel); await reloadCurrentDialogue(); } catch (err) { dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) }); } finally { dispatch({ type: 'SET_GENERATING', payload: false }); }
+  }, [state.currentDialogueId, state.selectedOllamaModel, reloadCurrentDialogue]);
 
   const selectImage = useCallback(async (messageId: string, index: number) => {
     dispatch({ type: 'SELECT_IMAGE', payload: { messageId, index } });
-    try {
-      await api.selectImage(messageId, index);
-    } catch (err) {
-      dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
-      await reloadCurrentDialogue();
-    }
+    try { await api.selectImage(messageId, index); } catch (err) { dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) }); await reloadCurrentDialogue(); }
   }, [reloadCurrentDialogue]);
 
   const selectTextVersion = useCallback(async (messageId: string, index: number) => {
     dispatch({ type: 'SELECT_TEXT_VERSION', payload: { messageId, index } });
-    try {
-      await api.selectVersion(messageId, index);
-    } catch (err) {
-      dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
-      await reloadCurrentDialogue();
-    }
+    try { await api.selectVersion(messageId, index); } catch (err) { dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) }); await reloadCurrentDialogue(); }
   }, [reloadCurrentDialogue]);
 
   return (
-    <AppContext.Provider
-      value={{
-        state,
-        dispatch,
-        currentDialogue,
-        refreshDialogueList,
-        openDialogue,
-        createDialogue,
-        deleteDialogue,
-        sendMessage,
-        regenerateText,
-        regenerateImage,
-        selectImage,
-        selectTextVersion,
-        refreshOllamaModels,
-        setSelectedOllamaModel,
-      }}
-    >
+    <AppContext.Provider value={{
+      state, dispatch, currentDialogue, refreshDialogueList, openDialogue, createDialogue, deleteDialogue,
+      updateDialogueSettings, sendMessage, stopGeneration, regenerateText, regenerateImage, selectImage, selectTextVersion,
+      refreshOllamaModels, setSelectedOllamaModel,
+    }}>
       {children}
     </AppContext.Provider>
   );

@@ -49,7 +49,9 @@ class Message(Base):
     image_variants = Column(JSON, default=list)  # Array of image paths
     selected_image_index = Column(Integer, default=0)
     has_image = Column(Boolean, default=False)
+    image_prompt = Column(Text, nullable=True)
     text_versions = Column(JSON, default=list)  # Array of content versions
+    debug_info = Column(JSON, default=dict)
     selected_version_index = Column(Integer, default=0)
     parent_id = Column(String, ForeignKey("messages.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
