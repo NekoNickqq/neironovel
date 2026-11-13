@@ -87,16 +87,21 @@ class OllamaClient:
         try:
             # Парсим JSON из ответа
             parsed = extract_json_from_text(content)
-
-            # Валидация структуры
-            if "blocks" not in parsed:
-                parsed["blocks"] = [{"speaker": "narrator", "text": content}]
-            if "image_prompt" not in parsed:
-                parsed["image_prompt"] = ""
-
-            return parsed
         except Exception as e:
             raise Exception(f"Ollama error: {e}")
+
+        # Валидация структуры. Используем .get(...) or ..., чтобы ловить
+        # не только отсутствующее поле, но и пустое (None / ""), иначе
+        # последующие ответы модели без image_prompt оставались бы без картинки.
+        if not parsed.get("blocks"):
+            parsed["blocks"] = [{"speaker": "narrator", "text": content}]
+
+        image_prompt = parsed.get("image_prompt") or ""
+        if isinstance(image_prompt, dict):  # модель иногда вложенный объект возвращает
+            image_prompt = image_prompt.get("prompt", "") or ""
+        parsed["image_prompt"] = str(image_prompt).strip()
+
+        return parsed
 
     async def _chat_native(
         self,

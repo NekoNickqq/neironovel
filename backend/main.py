@@ -298,10 +298,25 @@ async def send_message(req: SendMessageRequest, db: Session = Depends(get_db)):
     image_path = None
     has_image = False
     image_variants = []
-    
-    if req.generate_image and ai_response.get("image_prompt"):
+
+    image_prompt = (ai_response.get("image_prompt") or "").strip()
+
+    if req.generate_image:
+        # Если модель не вернула image_prompt (часто бывает в последующих ходах,
+        # когда ответы модели короче), формируем промпт сами из последних блоков
+        # ответа + стиль — чтобы картинка генерировалась на КАЖДОЕ сообщение.
+        if not image_prompt:
+            scene_text = " ".join(
+                b.get("text", "") for b in ai_response.get("blocks", [])
+            ).strip() or req.user_text
+            style_preset = dialogue.settings.style_preset if dialogue.settings else ""
+            image_prompt = (
+                f"{scene_text[:400]}, {style_preset}".strip(", ")
+            )
+            print("ℹ️ Model returned no image_prompt — built fallback prompt from response text")
+
         try:
-            image_path = await comfyui_client.generate_image(ai_response["image_prompt"])
+            image_path = await comfyui_client.generate_image(image_prompt)
             has_image = True
             image_variants = [image_path]
         except Exception as e:
