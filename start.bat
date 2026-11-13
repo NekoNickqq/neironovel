@@ -59,8 +59,8 @@ cd ..
 echo.
 
 echo [5/6] Проверка Frontend...
-if not exist "frontend\node_modules" (
-    echo frontend\node_modules не найден. Запускаю npm install...
+if not exist "frontend\node_modules\vite\bin\vite.js" (
+    echo Зависимости frontend не установлены или установка повреждена. Запускаю npm install...
     cd frontend
     call npm install
     cd ..
