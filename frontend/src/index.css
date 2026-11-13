@@ -54,6 +54,31 @@ body {
   background: #6d28d9;
 }
 
+/* Firefox */
+.scrollbar-thin {
+  scrollbar-color: #4c1d95 transparent;
+}
+
+/* Скроллбар textarea: скрыт, пока поле неактивно; тонкий стилизованный при фокусе/наведении.
+   При коротком тексте полоса не появляется автоматически (браузеры её не рисуют без переполнения) */
+textarea.scrollbar-thin {
+  scrollbar-width: none; /* Firefox */
+}
+
+textarea.scrollbar-thin::-webkit-scrollbar {
+  width: 0;
+}
+
+textarea.scrollbar-thin:hover::-webkit-scrollbar,
+textarea.scrollbar-thin:focus::-webkit-scrollbar {
+  width: 6px;
+}
+
+textarea.scrollbar-thin:hover,
+textarea.scrollbar-thin:focus {
+  scrollbar-width: thin;
+}
+
 .vn-text-box {
   background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.8) 70%, transparent 100%);
 }

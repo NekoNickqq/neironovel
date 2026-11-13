@@ -89,7 +89,7 @@ if errorlevel 1 (
 )
 
 set COMFYUI_OK=0
-powershell -Command "try { $null = Invoke-WebRequest -Uri 'http://192.168.1.107:1215/system_stats' -TimeoutSec 3 -UseBasicParsing; exit 0 } catch { exit 1 }" >nul 2>&1
+powershell -Command "try { $null = Invoke-WebRequest -Uri 'http://localhost:1215/system_stats' -TimeoutSec 3 -UseBasicParsing; exit 0 } catch { exit 1 }" >nul 2>&1
 if errorlevel 1 (
     echo [--] ComfyUI не отвечает. Проверь COMFYUI_URL в backend\.env
 ) else (
