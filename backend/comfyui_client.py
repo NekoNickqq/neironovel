@@ -22,11 +22,22 @@ class ComfyUIClient:
         except Exception as e:
             raise Exception(f"Workflow load error: {e}")
     
-    async def generate_image(self, prompt: str, seed: Optional[int] = None) -> dict:
+    async def generate_image(self, prompt: str, negative_prompt: str = "", seed: Optional[int] = None) -> dict:
         workflow = json.loads(json.dumps(self.workflow))
-        if "21" in workflow: workflow["21"]["inputs"]["text"] = prompt
+        
+        # Узел 21 - Positive Prompt
+        if "21" in workflow: 
+            workflow["21"]["inputs"]["text"] = prompt
+            
+        # Узел 20 - Negative Prompt (ДОБАВЛЯЕМ НАШ НЕГАТИВ К БАЗОВОМУ)
+        if "20" in workflow:
+            base_neg = workflow["20"]["inputs"].get("text", "")
+            if negative_prompt:
+                workflow["20"]["inputs"]["text"] = f"{base_neg}, {negative_prompt}"
+            
         used_seed = seed or generate_seed()
-        if "99" in workflow: workflow["99"]["inputs"]["seed"] = used_seed
+        if "99" in workflow: 
+            workflow["99"]["inputs"]["seed"] = used_seed
         
         async with httpx.AsyncClient(timeout=30) as client:
             try:
@@ -41,7 +52,6 @@ class ComfyUIClient:
                 raise Exception(f"ComfyUI HTTP error: {e}")
 
     async def interrupt(self):
-        """Посылает сигнал в ComfyUI прервать текущую генерацию"""
         try:
             async with httpx.AsyncClient(timeout=5) as client:
                 await client.post(f"{self.url}/interrupt")

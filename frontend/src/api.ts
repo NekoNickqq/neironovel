@@ -1,4 +1,4 @@
-import { Dialogue, DialogueSettings, Message } from './types';
+import { Dialogue, DialogueSettings, Message, WorldCard, CharacterCard } from './types';
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api';
 
@@ -27,19 +27,37 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-const DEFAULT_FONTS: DialogueSettings['font_config'] = {
+const DEFAULT_FONTS = {
   narrator: 'Cinzel, Georgia, serif',
   user: 'Inter, sans-serif',
   hero: 'Roboto, sans-serif',
   sidekick: 'Open Sans, sans-serif',
 };
 
+const DEFAULT_WORLD: WorldCard = {
+  id: '', name: 'Безымянный мир', history: '', features: '', appearance: 'dark fantasy, cinematic lighting, masterpiece, best quality, 8k', negative_prompt: ''
+};
+
 type ApiDialogueFull = {
-  id: string; title: string; settings: Partial<DialogueSettings> & { world_lore?: string }; messages: Message[]; created_at: string;
+  id: string; 
+  title: string; 
+  settings: {
+    world_data?: WorldCard;
+    character_cards?: CharacterCard[];
+    font_config?: any;
+    ai_controls_user?: boolean;
+  }; 
+  messages: Message[]; 
+  created_at: string;
 };
 
 type ApiDialogueSummary = {
-  id: string; title: string; description: string; message_count: number; character_count: number; style_preset: string; created_at: string;
+  id: string; 
+  title: string; 
+  description: string; 
+  message_count: number; 
+  character_count: number; 
+  created_at: string;
 };
 
 export function resolveMediaUrl(path: string | null | undefined): string | null {
@@ -52,29 +70,46 @@ export function resolveMediaUrl(path: string | null | undefined): string | null 
 function normalizeMessage(m: Message): Message {
   const imageVariants = (m.image_variants ?? []).map(v => resolveMediaUrl(v) ?? v);
   return {
-    ...m, blocks: m.blocks ?? [], image_path: resolveMediaUrl(m.image_path),
-    image_variants: imageVariants, text_versions: m.text_versions ?? [], debug_info: m.debug_info ?? null,
+    ...m, 
+    blocks: m.blocks ?? [], 
+    image_path: resolveMediaUrl(m.image_path),
+    image_variants: imageVariants, 
+    text_versions: m.text_versions ?? [], 
+    debug_info: m.debug_info ?? null,
   };
 }
 
 export function normalizeDialogue(data: ApiDialogueFull): Dialogue {
   const settings = data.settings ?? {};
   return {
-    id: data.id, title: data.title, description: settings.world_lore?.slice(0, 100) ?? '',
+    id: data.id, 
+    title: data.title, 
+    description: settings.world_data?.name ?? '',
     settings: {
-      world_lore: settings.world_lore ?? '', character_cards: settings.character_cards ?? [],
-      style_preset: settings.style_preset ?? '', font_config: { ...DEFAULT_FONTS, ...(settings.font_config ?? {}) },
+      world_data: settings.world_data ?? DEFAULT_WORLD, 
+      character_cards: settings.character_cards ?? [],
+      font_config: { ...DEFAULT_FONTS, ...(settings.font_config ?? {}) },
       ai_controls_user: settings.ai_controls_user ?? false,
     },
-    messages: (data.messages ?? []).map(normalizeMessage), created_at: data.created_at,
+    messages: (data.messages ?? []).map(normalizeMessage), 
+    created_at: data.created_at,
   };
 }
 
 export function summaryToDialogue(s: ApiDialogueSummary): Dialogue {
   return {
-    id: s.id, title: s.title, description: s.description,
-    settings: { world_lore: s.description, character_cards: [], style_preset: s.style_preset, font_config: DEFAULT_FONTS, ai_controls_user: false },
-    messages: [], created_at: s.created_at, message_count: s.message_count,
+    id: s.id, 
+    title: s.title, 
+    description: s.description,
+    settings: { 
+      world_data: { ...DEFAULT_WORLD, name: s.description }, 
+      character_cards: [], 
+      font_config: DEFAULT_FONTS, 
+      ai_controls_user: false 
+    },
+    messages: [], 
+    created_at: s.created_at, 
+    message_count: s.message_count,
   };
 }
 
@@ -94,6 +129,14 @@ export const api = {
   updateOllamaSettings: (body: Partial<{ mode: OllamaMode; ollama_url: string; api_base_url: string; api_key: string; model_local: string; model_api: string; }>) => request<{ status: string; mode: OllamaMode; active_model: string; active_url: string }>('/ollama/settings', { method: 'POST', body: JSON.stringify(body) }),
   listOllamaModels: () => request<OllamaModelsInfo>('/ollama/models'),
 
+  // КАТАЛОГ
+  listWorlds: () => request<WorldCard[]>('/catalog/worlds'),
+  createWorld: (body: Omit<WorldCard, 'id'>) => request<{ id: string }>('/catalog/worlds', { method: 'POST', body: JSON.stringify(body) }),
+  listCharacters: () => request<CharacterCard[]>('/catalog/characters'),
+  createCharacter: (body: Omit<CharacterCard, 'id' | 'color'>) => request<{ id: string }>('/catalog/characters', { method: 'POST', body: JSON.stringify(body) }),
+  generateNegative: (type: 'world' | 'character', data: any) => request<{ negative: string }>('/generate_negative', { method: 'POST', body: JSON.stringify({ type, data }) }),
+
+  // ДИАЛОГИ
   listDialogues: async (): Promise<Dialogue[]> => {
     const rows = await request<ApiDialogueSummary[]>('/dialogues');
     return rows.map(summaryToDialogue);
@@ -102,19 +145,19 @@ export const api = {
     const data = await request<ApiDialogueFull>(`/dialogues/${id}`);
     return normalizeDialogue(data);
   },
-  createDialogue: async (body: { title: string; description?: string; world_lore: string; character_cards: DialogueSettings['character_cards']; style_preset: string; ai_controls_user: boolean; }) => {
+  createDialogue: async (body: { title: string; description?: string; world_data: WorldCard; character_cards: CharacterCard[]; ai_controls_user: boolean; }) => {
     const { dialogue_id } = await request<{ dialogue_id: string }>('/dialogues', { method: 'POST', body: JSON.stringify(body) });
     return api.getDialogue(dialogue_id);
   },
   deleteDialogue: (id: string) => request<{ status: string }>(`/dialogues/${id}`, { method: 'DELETE' }),
-  updateSettings: (dialogueId: string, body: { world_lore?: string; character_cards?: any[]; style_preset?: string }) => request<{ status: string }>(`/dialogues/${dialogueId}/settings`, { method: 'PATCH', body: JSON.stringify(body) }),
+  updateSettings: (dialogueId: string, body: { world_data?: WorldCard; character_cards?: CharacterCard[]; ai_controls_user?: boolean }) => request<{ status: string }>(`/dialogues/${dialogueId}/settings`, { method: 'PATCH', body: JSON.stringify(body) }),
 
-  // ДОБАВЛЕН signal ДЛЯ ОТМЕНЫ
+  // СООБЩЕНИЯ
   sendMessage: (dialogueId: string, userText: string, generateImage: boolean, model?: string | null, signal?: AbortSignal) =>
     request<{ assistant_message_id: string; has_image: boolean; image_path: string | null }>('/message', {
       method: 'POST',
       body: JSON.stringify({ dialogue_id: dialogueId, user_text: userText, generate_image: generateImage, ...(model ? { model } : {}) }),
-      signal, // <-- Передаем сигнал в fetch
+      signal,
     }),
 
   regenerateText: (dialogueId: string, messageId: string, model?: string | null) => request<{ message_id: string; new_blocks: Message['blocks']; version_count: number }>('/regenerate/text', { method: 'POST', body: JSON.stringify({ dialogue_id: dialogueId, message_id: messageId, ...(model ? { model } : {}) }) }),

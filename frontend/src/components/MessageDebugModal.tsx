@@ -81,12 +81,23 @@ export function MessageDebugModal({ message, onClose }: { message: Message; onCl
           )}
 
           {tab === 'image' && (
-            <div>
-              <div className="mb-2">
-                <span className="text-xs text-gray-500">Источник промпта: </span>
-                <span className={`text-xs font-bold px-2 py-0.5 rounded ${debug.image_prompt_source === 'model' ? 'bg-emerald-900/50 text-emerald-400' : 'bg-amber-900/50 text-amber-400'}`}>{debug.image_prompt_source?.toUpperCase() || 'N/A'}</span>
+            <div className="space-y-4">
+              <div>
+                <div className="mb-1">
+                  <span className="text-xs text-gray-500">Источник промпта: </span>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded ${debug.image_prompt_source === 'model' ? 'bg-emerald-900/50 text-emerald-400' : 'bg-amber-900/50 text-amber-400'}`}>{debug.image_prompt_source?.toUpperCase() || 'N/A'}</span>
+                </div>
+                <h3 className="text-sm font-semibold text-emerald-400 mb-1">Positive Prompt</h3>
+                <pre className="whitespace-pre-wrap font-mono text-sm text-emerald-300 bg-gray-900 p-3 rounded-lg border border-gray-800">{debug.image_prompt_used || 'Промпт не использовался'}</pre>
               </div>
-              <pre className="whitespace-pre-wrap font-mono text-sm text-emerald-300 bg-gray-900 p-3 rounded-lg border border-gray-800">{debug.image_prompt_used || 'Промпт не использовался'}</pre>
+              
+              {debug.negative_prompt_used && (
+                <div>
+                  <h3 className="text-sm font-semibold text-red-400 mb-1">Negative Prompt</h3>
+                  <pre className="whitespace-pre-wrap font-mono text-sm text-red-300 bg-gray-900 p-3 rounded-lg border border-gray-800">{debug.negative_prompt_used}</pre>
+                </div>
+              )}
+
               {debug.comfyui_info?.seed && <p className="mt-2 text-xs text-gray-400">Seed: <span className="text-gray-200">{debug.comfyui_info.seed}</span></p>}
             </div>
           )}

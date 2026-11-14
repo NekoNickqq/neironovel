@@ -4,6 +4,7 @@ import { CreateDialogue } from './components/CreateDialogue';
 import { ChatMode } from './components/ChatMode';
 import { VisualNovelMode } from './components/VisualNovelMode';
 import { ApiStatusBar } from './components/ApiStatusBar';
+import { Catalog } from './components/Catalog'; // <-- ДОБАВЛЕН ИМПОРТ
 
 function AppContent() {
   const { state } = useApp();
@@ -17,6 +18,8 @@ function AppContent() {
       return <ChatMode />;
     case 'novel':
       return <VisualNovelMode />;
+    case 'catalog':          // <-- ДОБАВЛЕН МАРШРУТ
+      return <Catalog />;
     default:
       return <DialogueList />;
   }

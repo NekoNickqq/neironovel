@@ -1,2 +1,46 @@
-dist/
+# === Python / Backend ===
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.pytest_cache/
+.mypy_cache/
+
+# === Медиа и данные (очень важно!) ===
+# База данных SQLite
+backend/data/*.db
+backend/data/*.sqlite3
+# Локальные настройки Ollama
+backend/data/ollama_settings.json
+# Сгенерированные картинки и аватарки
+backend/gallery/*
+backend/avatars/*
+# Оставляем файлы .gitkeep, чтобы папки не удалялись из Git
+!backend/gallery/.gitkeep
+!backend/avatars/.gitkeep
+!backend/data/.gitkeep
+
+# === Секреты и окружение ===
+# Файлы .env содержат API-ключи и пароли, их нельзя пушить!
+.env
+.env.local
+.env.*.local
+
+# === Node.js / Frontend ===
 node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# === Операционные системы и IDE ===
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
