@@ -35,7 +35,7 @@ const DEFAULT_FONTS = {
 };
 
 const DEFAULT_WORLD: WorldCard = {
-  id: '', name: 'Безымянный мир', history: '', features: '', appearance: 'dark fantasy, cinematic lighting, masterpiece, best quality, 8k', negative_prompt: ''
+  id: '', name: 'Безымянный мир', history: '', features: '', appearance: 'dark fantasy, cinematic lighting, masterpiece, best quality, 8k', negative_prompt: '', image_variants: [], selected_image_index: 0
 };
 
 type ApiDialogueFull = {
@@ -70,46 +70,32 @@ export function resolveMediaUrl(path: string | null | undefined): string | null 
 function normalizeMessage(m: Message): Message {
   const imageVariants = (m.image_variants ?? []).map(v => resolveMediaUrl(v) ?? v);
   return {
-    ...m, 
-    blocks: m.blocks ?? [], 
-    image_path: resolveMediaUrl(m.image_path),
-    image_variants: imageVariants, 
-    text_versions: m.text_versions ?? [], 
-    debug_info: m.debug_info ?? null,
+    ...m, blocks: m.blocks ?? [], image_path: resolveMediaUrl(m.image_path),
+    image_variants: imageVariants, text_versions: m.text_versions ?? [], debug_info: m.debug_info ?? null,
   };
 }
 
 export function normalizeDialogue(data: ApiDialogueFull): Dialogue {
   const settings = data.settings ?? {};
   return {
-    id: data.id, 
-    title: data.title, 
-    description: settings.world_data?.name ?? '',
+    id: data.id, title: data.title, description: settings.world_data?.name ?? '',
     settings: {
       world_data: settings.world_data ?? DEFAULT_WORLD, 
-      character_cards: settings.character_cards ?? [],
+      character_cards: (settings.character_cards ?? []).map(c => ({
+        ...c, image_variants: (c.image_variants ?? []).map(v => resolveMediaUrl(v) ?? v)
+      })),
       font_config: { ...DEFAULT_FONTS, ...(settings.font_config ?? {}) },
       ai_controls_user: settings.ai_controls_user ?? false,
     },
-    messages: (data.messages ?? []).map(normalizeMessage), 
-    created_at: data.created_at,
+    messages: (data.messages ?? []).map(normalizeMessage), created_at: data.created_at,
   };
 }
 
 export function summaryToDialogue(s: ApiDialogueSummary): Dialogue {
   return {
-    id: s.id, 
-    title: s.title, 
-    description: s.description,
-    settings: { 
-      world_data: { ...DEFAULT_WORLD, name: s.description }, 
-      character_cards: [], 
-      font_config: DEFAULT_FONTS, 
-      ai_controls_user: false 
-    },
-    messages: [], 
-    created_at: s.created_at, 
-    message_count: s.message_count,
+    id: s.id, title: s.title, description: s.description,
+    settings: { world_data: { ...DEFAULT_WORLD, name: s.description }, character_cards: [], font_config: DEFAULT_FONTS, ai_controls_user: false },
+    messages: [], created_at: s.created_at, message_count: s.message_count,
   };
 }
 
@@ -130,11 +116,36 @@ export const api = {
   listOllamaModels: () => request<OllamaModelsInfo>('/ollama/models'),
 
   // КАТАЛОГ
-  listWorlds: () => request<WorldCard[]>('/catalog/worlds'),
+  listWorlds: async () => {
+    const rows = await request<WorldCard[]>('/catalog/worlds');
+    return rows.map(w => ({ ...w, image_variants: (w.image_variants ?? []).map(v => resolveMediaUrl(v) ?? v) }));
+  },
   createWorld: (body: Omit<WorldCard, 'id'>) => request<{ id: string }>('/catalog/worlds', { method: 'POST', body: JSON.stringify(body) }),
-  listCharacters: () => request<CharacterCard[]>('/catalog/characters'),
+  listCharacters: async () => {
+    const rows = await request<CharacterCard[]>('/catalog/characters');
+    return rows.map(c => ({ ...c, image_variants: (c.image_variants ?? []).map(v => resolveMediaUrl(v) ?? v) }));
+  },
   createCharacter: (body: Omit<CharacterCard, 'id' | 'color'>) => request<{ id: string }>('/catalog/characters', { method: 'POST', body: JSON.stringify(body) }),
   generateNegative: (type: 'world' | 'character', data: any) => request<{ negative: string }>('/generate_negative', { method: 'POST', body: JSON.stringify({ type, data }) }),
+  
+  uploadImage: async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE}/catalog/upload_image`, { method: 'POST', body: formData });
+    if (!res.ok) throw new Error('Ошибка загрузки');
+    const data = await res.json();
+    return { image_path: resolveMediaUrl(data.image_path) };
+  },
+
+  generateCardImage: async (type: 'world' | 'character', prompt: string, negative_prompt: string) => {
+    const res = await request<{ image_path: string }>('/catalog/generate_image', { method: 'POST', body: JSON.stringify({ type, prompt, negative_prompt }) });
+    return { image_path: resolveMediaUrl(res.image_path) };
+  },
+
+  updateCardImages: (type: 'world' | 'character', id: string, image_variants: string[], selected_image_index: number) => 
+    request<{ status: string }>(`/catalog/${type}/${id}/images`, { method: 'PATCH', body: JSON.stringify({ image_variants, selected_image_index }) }),
+
+  deleteCard: (type: 'world' | 'character', id: string) => request<{ status: string }>(`/catalog/${type}/${id}`, { method: 'DELETE' }),
 
   // ДИАЛОГИ
   listDialogues: async (): Promise<Dialogue[]> => {

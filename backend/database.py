@@ -17,6 +17,8 @@ class WorldCard(Base):
     features = Column(Text, default="")
     appearance = Column(Text, default="")
     negative_prompt = Column(Text, default="")
+    image_variants = Column(JSON, default=list)
+    selected_image_index = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class CharacterCard(Base):
@@ -28,6 +30,8 @@ class CharacterCard(Base):
     features = Column(Text, default="")
     negative_appearance = Column(Text, default="")
     negative_personality = Column(Text, default="")
+    image_variants = Column(JSON, default=list)
+    selected_image_index = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 # --- СУЩЕСТВУЮЩИЕ ТАБЛИЦЫ ---

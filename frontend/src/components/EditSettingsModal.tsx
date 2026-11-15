@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '../store';
 import { X, Save } from 'lucide-react';
+import { DialogueConfigurator } from './DialogueConfigurator';
 
 export function EditSettingsModal({ onClose }: { onClose: () => void }) {
   const { state, currentDialogue, updateDialogueSettings } = useApp();
@@ -29,29 +30,14 @@ export function EditSettingsModal({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} className="text-gray-400 hover:text-white"><X size={18} /></button>
         </div>
         
-        <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto scrollbar-thin">
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">Мир</label>
-            <select value={selectedWorldId} onChange={e => setSelectedWorldId(e.target.value)} className="w-full bg-gray-800 p-2 rounded focus:border-purple-500 outline-none">
-              <option value="">-- Выберите мир --</option>
-              {state.worlds.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-            </select>
-          </div>
-          
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">Персонажи</label>
-            <div className="grid grid-cols-2 gap-2">
-              {state.characters.map(c => (
-                <label key={c.id} className={`flex items-center gap-2 p-2 rounded cursor-pointer border ${selectedCharIds.includes(c.id) ? 'bg-purple-900/30 border-purple-500' : 'bg-gray-800 border-transparent'}`}>
-                  <input type="checkbox" checked={selectedCharIds.includes(c.id)} onChange={(e) => {
-                    if (e.target.checked) setSelectedCharIds([...selectedCharIds, c.id]);
-                    else setSelectedCharIds(selectedCharIds.filter(id => id !== c.id));
-                  }} className="w-4 h-4" />
-                  <span className="text-white text-sm">{c.name}</span>
-                </label>
-              ))}
-            </div>
-          </div>
+        <div className="p-4 max-h-[70vh] overflow-y-auto scrollbar-thin">
+          {/* ИСПОЛЬЗУЕМ НОВЫЙ КОМПОНЕНТ */}
+          <DialogueConfigurator 
+            selectedWorldId={selectedWorldId} 
+            setSelectedWorldId={setSelectedWorldId} 
+            selectedCharIds={selectedCharIds} 
+            setSelectedCharIds={setSelectedCharIds} 
+          />
         </div>
         
         <div className="flex justify-end gap-2 border-t border-gray-800 p-3 bg-gray-950">

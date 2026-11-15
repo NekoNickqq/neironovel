@@ -3,7 +3,7 @@ import { Dialogue, Message, AppView, WorldCard, CharacterCard } from './types';
 import { api, ApiError, OllamaMode } from './api';
 
 interface AppState {
-  dialogues: Dialogue[]; currentDialogueId: string | null; currentView: AppView; isGenerating: boolean; isLoadingList: boolean;
+  dialogues: Dialogue[]; currentDialogueId: string | null; isGenerating: boolean; isLoadingList: boolean;
   novelModeHidden: boolean; apiError: string | null; services: { ollama: boolean; comfyui: boolean } | null;
   ollamaMode: OllamaMode; ollamaModels: string[]; selectedOllamaModel: string | null;
   draftDialogue: Dialogue | null;
@@ -12,7 +12,7 @@ interface AppState {
 }
 
 type Action =
-  | { type: 'SET_VIEW'; payload: AppView } | { type: 'SET_DIALOGUES'; payload: Dialogue[] }
+  | { type: 'SET_DIALOGUES'; payload: Dialogue[] }
   | { type: 'UPSERT_DIALOGUE'; payload: Dialogue } | { type: 'SELECT_DIALOGUE'; payload: string }
   | { type: 'SET_GENERATING'; payload: boolean } | { type: 'SET_LOADING_LIST'; payload: boolean }
   | { type: 'SET_API_ERROR'; payload: string | null } | { type: 'SET_SERVICES'; payload: { ollama: boolean; comfyui: boolean } | null }
@@ -24,7 +24,7 @@ type Action =
   | { type: 'SET_WORLDS'; payload: WorldCard[] } | { type: 'SET_CHARACTERS'; payload: CharacterCard[] };
 
 const initialState: AppState = {
-  dialogues: [], currentDialogueId: null, currentView: 'list', isGenerating: false, isLoadingList: true,
+  dialogues: [], currentDialogueId: null, isGenerating: false, isLoadingList: true,
   novelModeHidden: false, apiError: null, services: null, ollamaMode: 'local', ollamaModels: [], selectedOllamaModel: null,
   draftDialogue: null, worlds: [], characters: [],
 };
@@ -37,7 +37,6 @@ function upsertDialogueList(dialogues: Dialogue[], dialogue: Dialogue): Dialogue
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
-    case 'SET_VIEW': return { ...state, currentView: action.payload };
     case 'SET_DIALOGUES': return { ...state, dialogues: action.payload };
     case 'UPSERT_DIALOGUE': return { ...state, dialogues: upsertDialogueList(state.dialogues, action.payload) };
     case 'SELECT_DIALOGUE': return { ...state, currentDialogueId: action.payload };
@@ -85,7 +84,7 @@ interface AppContextType {
   refreshDialogueList: () => Promise<void>;
   refreshCatalog: () => Promise<void>;
   openDialogue: (id: string) => Promise<void>;
-  createDialogue: (payload: { title: string; description: string; world_data: WorldCard; character_cards: CharacterCard[]; ai_controls_user: boolean; }) => Promise<void>;
+  createDialogue: (payload: { title: string; description: string; world_data: WorldCard; character_cards: CharacterCard[]; ai_controls_user: boolean; }) => Promise<string>;
   deleteDialogue: (id: string) => Promise<void>;
   updateDialogueSettings: (payload: { world_data?: WorldCard; character_cards?: CharacterCard[]; ai_controls_user?: boolean }) => Promise<void>;
   sendMessage: (text: string, generateImage: boolean) => Promise<void>;
@@ -136,7 +135,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const setDraftForReuse = useCallback((dialogue: Dialogue) => {
     dispatch({ type: 'SET_DRAFT_DIALOGUE', payload: dialogue });
-    dispatch({ type: 'SET_VIEW', payload: 'create' });
   }, []);
 
   const clearDraft = useCallback(() => { dispatch({ type: 'SET_DRAFT_DIALOGUE', payload: null }); }, []);
@@ -157,10 +155,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const dialogue = await api.createDialogue(payload);
       dispatch({ type: 'UPSERT_DIALOGUE', payload: dialogue });
       dispatch({ type: 'SELECT_DIALOGUE', payload: dialogue.id });
-      dispatch({ type: 'SET_VIEW', payload: 'chat' });
       dispatch({ type: 'SET_API_ERROR', payload: null });
       dispatch({ type: 'SET_DRAFT_DIALOGUE', payload: null });
-    } catch (err) { dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) }); throw err; }
+      return dialogue.id;
+    } catch (err) { 
+      dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) }); 
+      throw err; 
+    }
   }, []);
 
   const deleteDialogue = useCallback(async (id: string) => {

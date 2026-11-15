@@ -1,16 +1,19 @@
 import uuid
 import os
+import re
 import sys
 import time
 import asyncio
 from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import List, Optional
-from fastapi import FastAPI, HTTPException, Depends, Request
+from utils import extract_json_from_text
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from fastapi import FastAPI, HTTPException, Depends, Request, UploadFile, File
+import shutil
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -18,7 +21,6 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from config import config
-# ОБЯЗАТЕЛЬНО убедись, что в database.py добавлены WorldCard и CharacterCard!
 from database import init_db, get_db, Dialogue, DialogueSettings, Message, WorldCard, CharacterCard
 from ollama_client import ollama_client
 from ollama_settings import ollama_settings
@@ -105,6 +107,16 @@ class GenerateNegativeRequest(BaseModel):
     type: str # "world" | "character"
     data: dict
 
+class GenerateCardImageRequest(BaseModel):
+    type: str # "world" | "character"
+    prompt: str
+    negative_prompt: str = ""
+
+class UpdateImagesRequest(BaseModel):
+    image_variants: list
+    selected_image_index: int
+
+# ОБНОВЛЕННЫЕ СХЕМЫ КАРТОЧЕК
 class WorldCardSchema(BaseModel):
     id: Optional[str] = None
     name: str
@@ -112,6 +124,8 @@ class WorldCardSchema(BaseModel):
     features: str
     appearance: str
     negative_prompt: str
+    image_variants: list = []
+    selected_image_index: int = 0
 
 class CharacterCardSchema(BaseModel):
     id: Optional[str] = None
@@ -121,6 +135,8 @@ class CharacterCardSchema(BaseModel):
     features: str = ""
     negative_appearance: str
     negative_personality: str
+    image_variants: list = []
+    selected_image_index: int = 0
 
 # ============ Эндпоинты ============
 
@@ -162,7 +178,13 @@ async def list_ollama_models():
 @app.get("/catalog/worlds")
 async def list_worlds(db: Session = Depends(get_db)):
     worlds = db.query(WorldCard).all()
-    return [{"id": w.id, "name": w.name, "history": w.history, "features": w.features, "appearance": w.appearance, "negative_prompt": w.negative_prompt} for w in worlds]
+    return [
+        {
+            "id": w.id, "name": w.name, "history": w.history, "features": w.features, 
+            "appearance": w.appearance, "negative_prompt": w.negative_prompt, 
+            "image_variants": w.image_variants, "selected_image_index": w.selected_image_index
+        } for w in worlds
+    ]
 
 @app.post("/catalog/worlds")
 async def create_world(req: WorldCardSchema, db: Session = Depends(get_db)):
@@ -174,7 +196,14 @@ async def create_world(req: WorldCardSchema, db: Session = Depends(get_db)):
 @app.get("/catalog/characters")
 async def list_chars(db: Session = Depends(get_db)):
     chars = db.query(CharacterCard).all()
-    return [{"id": c.id, "name": c.name, "appearance": c.appearance, "personality": c.personality, "features": c.features, "negative_appearance": c.negative_appearance, "negative_personality": c.negative_personality} for c in chars]
+    return [
+        {
+            "id": c.id, "name": c.name, "appearance": c.appearance, "personality": c.personality, 
+            "features": c.features, "negative_appearance": c.negative_appearance, 
+            "negative_personality": c.negative_personality,
+            "image_variants": c.image_variants, "selected_image_index": c.selected_image_index
+        } for c in chars
+    ]
 
 @app.post("/catalog/characters")
 async def create_char(req: CharacterCardSchema, db: Session = Depends(get_db)):
@@ -183,21 +212,115 @@ async def create_char(req: CharacterCardSchema, db: Session = Depends(get_db)):
     db.commit()
     return {"id": c.id}
 
+@app.patch("/catalog/{card_type}/{card_id}/images")
+async def update_card_images(card_type: str, card_id: str, req: UpdateImagesRequest, db: Session = Depends(get_db)):
+    if card_type == "world":
+        card = db.query(WorldCard).filter(WorldCard.id == card_id).first()
+    else:
+        card = db.query(CharacterCard).filter(CharacterCard.id == card_id).first()
+        
+    if not card: raise HTTPException(404, "Card not found")
+    
+    card.image_variants = req.image_variants
+    card.selected_image_index = req.selected_image_index
+    db.commit()
+    return {"status": "updated"}
+
+@app.delete("/catalog/{card_type}/{card_id}")
+async def delete_card(card_type: str, card_id: str, db: Session = Depends(get_db)):
+    if card_type == "world":
+        card = db.query(WorldCard).filter(WorldCard.id == card_id).first()
+    else:
+        card = db.query(CharacterCard).filter(CharacterCard.id == card_id).first()
+        
+    if not card: raise HTTPException(404, "Card not found")
+    
+    db.delete(card)
+    db.commit()
+    return {"status": "deleted"}
+
 @app.post("/generate_negative")
 async def generate_negative(req: GenerateNegativeRequest):
-    """Генерирует негативный промпт на основе заполненных полей"""
     if req.type == "world":
-        prompt = f"Создай негативный промпт на английском для мира. Мир: {req.data.get('name')}. История: {req.data.get('history')}. Особенности: {req.data.get('features')}. Внешний вид: {req.data.get('appearance')}. Что НЕ должно быть в этом мире? Ответь ТОЛЬКО текстом негативного промпта на английском."
+        prompt = f"Create a comma-separated list of negative tags in English for a world. World: {req.data.get('name')}. History: {req.data.get('history')}. Features: {req.data.get('features')}. Appearance: {req.data.get('appearance')}. What should NOT be in this world? Return ONLY the tags separated by commas. Do not use JSON, quotes, or colons."
+        
+        try:
+            res = await ollama_client.chat([{"role": "user", "content": prompt}], "You are a prompt engineer. Output ONLY the requested format.")
+            raw = res.get("raw", "")
+            
+            # Если LLM всё равно выдала JSON, пытаемся достать текст
+            if raw.strip().startswith('{'):
+                try:
+                    parsed = extract_json_from_text(raw)
+                    raw = str(list(parsed.values())[0]) if parsed else raw
+                except:
+                    pass
+                    
+            text = re.sub(r'[^a-zA-Z0-9,\s]', '', raw)
+            tags = [t.strip() for t in text.split(',') if t.strip()]
+            unique_tags = list(dict.fromkeys(tags))
+            return {"negative": ", ".join(unique_tags)}
+        except Exception as e:
+            raise HTTPException(500, str(e))
+            
     else:
-        prompt = f"Создай негативный промпт на английском для персонажа. Имя: {req.data.get('name')}. Внешность: {req.data.get('appearance')}. Характер: {req.data.get('personality')}. Что НЕ должно быть в его внешности и характере? Ответь ТОЛЬКО текстом негативного промпта на английском."
+        # Для персонажа используем строгий JSON
+        prompt = f"""Create negative tags in English for a character. 
+Name: {req.data.get('name')}. 
+Appearance: {req.data.get('appearance')}. 
+Personality: {req.data.get('personality')}. 
+Return a JSON object with exactly two keys: "negative_appearance" and "negative_personality". 
+The values should be comma-separated strings of tags.
+Example format: {{"negative_appearance": "old, short hair", "negative_personality": "obedient, dull"}}"""
+        
+        try:
+            res = await ollama_client.chat([{"role": "user", "content": prompt}], "You are a prompt engineer. Output ONLY valid JSON.")
+            raw = res.get("raw", "")
+            
+            # Используем умный парсер, который уже есть в проекте
+            data = extract_json_from_text(raw)
+            
+            neg_app = data.get("negative_appearance") or data.get("appearance") or ""
+            neg_pers = data.get("negative_personality") or data.get("personality") or ""
+            
+            # Если LLM выдала полную чушь, делаем fallback
+            if not neg_app and not neg_pers:
+                text = re.sub(r'[^a-zA-Z0-9,\s]', '', raw)
+                return {"negative_appearance": text, "negative_personality": text}
+                
+            # Финальная очистка от мусора
+            neg_app = re.sub(r'[^a-zA-Z0-9,\s]', '', str(neg_app))
+            neg_pers = re.sub(r'[^a-zA-Z0-9,\s]', '', str(neg_pers))
+            
+            return {"negative_appearance": neg_app, "negative_personality": neg_pers}
+            
+        except Exception as e:
+            print(f"JSON parse failed: {e}, raw was: {raw}")
+            text = re.sub(r'[^a-zA-Z0-9,\s]', '', raw)
+            return {"negative_appearance": text, "negative_personality": text}
+
+@app.post("/catalog/upload_image")
+async def upload_image(file: UploadFile = File(...)):
+    file_ext = file.filename.split(".")[-1]
+    filename = f"{uuid.uuid4()}.{file_ext}"
+    filepath = os.path.join(config.AVATARS_PATH, filename)
     
+    with open(filepath, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    return {"image_path": f"/avatars/{filename}"}
+
+@app.post("/catalog/generate_image")
+async def generate_card_image(req: GenerateCardImageRequest):
     try:
-        res = await ollama_client.chat([{"role": "user", "content": prompt}], "Ты — промпт-инженер. Отвечай только тегами.")
-        # Достаем текст из ответа LLM
-        text = res["parsed"].get("blocks", [{}])[0].get("text", "").strip()
-        return {"negative": text}
+        if req.type == "world":
+            res = await comfyui_client.generate_image(req.prompt, req.negative_prompt, width=1280, height=720)
+        else:
+            res = await comfyui_client.generate_image(req.prompt, req.negative_prompt, width=720, height=1680)
+            
+        return {"image_path": res["image_path"]}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 # --- ДИАЛОГИ ---
 
@@ -295,7 +418,6 @@ async def send_message(req: SendMessageRequest, request: Request, db: Session = 
         if m.role == "user": history.append({"role": "user", "content": m.content[0]["text"] if m.content else ""})
         elif m.role == "assistant": history.append({"role": "assistant", "content": "\n".join([f"[{b['speaker']}]: {b['text']}" for b in m.content])})
     
-    # ИСПОЛЬЗУЕМ НОВЫЕ ПАРАМЕТРЫ
     system_prompt = build_system_prompt(
         dialogue.settings.world_data if dialogue.settings else {},
         dialogue.settings.character_cards if dialogue.settings else [],
@@ -342,7 +464,6 @@ async def send_message(req: SendMessageRequest, request: Request, db: Session = 
 
         if req.generate_image:
             if not image_prompt:
-                # Fallback если LLM не вернула промпт
                 scene_text = " ".join(b.get("text", "") for b in ai_response.get("blocks", [])).strip() or req.user_text
                 style_preset = dialogue.settings.world_data.get("appearance", "") if dialogue.settings else ""
                 image_prompt = f"{scene_text[:400]}, {style_preset}".strip(", ")

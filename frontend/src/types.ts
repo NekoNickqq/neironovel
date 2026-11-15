@@ -7,6 +7,8 @@ export interface WorldCard {
   features: string;
   appearance: string;
   negative_prompt: string;
+  image_variants: string[];
+  selected_image_index: number;
 }
 
 export interface CharacterCard {
@@ -17,6 +19,8 @@ export interface CharacterCard {
   features: string;
   negative_appearance: string;
   negative_personality: string;
+  image_variants: string[];
+  selected_image_index: number;
   color?: string; // для UI
 }
 

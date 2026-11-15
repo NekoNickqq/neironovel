@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { useApp } from '../store';
-import { Plus, MessageSquare, Trash2, BookOpen, Image, Pencil, Copy, LayoutGrid } from 'lucide-react';
+import { Plus, MessageSquare, Trash2, Pencil, Copy, LayoutGrid } from 'lucide-react';
 import { EditSettingsModal } from './EditSettingsModal';
+import { useNavigate } from 'react-router-dom';
 
 export function DialogueList() {
   const { state, dispatch, openDialogue, deleteDialogue, setDraftForReuse } = useApp();
   const [editingId, setEditingId] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   const handleEditClick = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -24,10 +26,10 @@ export function DialogueList() {
             <p className="text-gray-400 mt-2">Интерактивные истории с ИИ</p>
           </div>
           <div className="flex gap-3">
-            <button onClick={() => dispatch({ type: 'SET_VIEW', payload: 'catalog' })} className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 rounded-xl text-white font-medium transition-all shadow-lg shadow-emerald-600/20">
+            <button onClick={() => navigate('/catalog')} className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 rounded-xl text-white font-medium transition-all shadow-lg shadow-emerald-600/20">
               <LayoutGrid size={20} /> Каталог
             </button>
-            <button onClick={() => { dispatch({ type: 'SET_DRAFT_DIALOGUE', payload: null }); dispatch({ type: 'SET_VIEW', payload: 'create' }); }} className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white font-medium transition-all shadow-lg shadow-purple-600/20">
+            <button onClick={() => { dispatch({ type: 'SET_DRAFT_DIALOGUE', payload: null }); navigate('/create'); }} className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white font-medium transition-all shadow-lg shadow-purple-600/20">
               <Plus size={20} /> Новый диалог
             </button>
           </div>
@@ -38,7 +40,7 @@ export function DialogueList() {
         ) : (
           <div className="grid gap-4">
             {state.dialogues.map(dialogue => (
-              <div key={dialogue.id} onClick={() => { void openDialogue(dialogue.id).then(() => dispatch({ type: 'SET_VIEW', payload: 'chat' })); }} className="group bg-surface/50 border border-purple-900/30 rounded-2xl p-6 hover:border-purple-600/50 cursor-pointer flex justify-between transition-all">
+              <div key={dialogue.id} onClick={() => navigate('/chat/' + dialogue.id)} className="group bg-surface/50 border border-purple-900/30 rounded-2xl p-6 hover:border-purple-600/50 cursor-pointer flex justify-between transition-all">
                 <div className="flex-1">
                   <h3 className="text-xl font-semibold text-white flex items-center gap-3"><MessageSquare size={20} className="text-purple-400" /> {dialogue.title}</h3>
                   <p className="text-gray-400 text-sm mt-2">{dialogue.settings.world_data?.name || "Без мира"}</p>
@@ -51,7 +53,7 @@ export function DialogueList() {
                 {/* ВЕРТИКАЛЬНЫЕ КНОПКИ */}
                 <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-all justify-center" onClick={e => e.stopPropagation()}>
                   <button onClick={(e) => handleEditClick(dialogue.id, e)} className="p-2 text-blue-400 hover:bg-blue-900/20 rounded-lg" title="Редактировать"><Pencil size={16} /></button>
-                  <button onClick={() => setDraftForReuse(dialogue)} className="p-2 text-emerald-400 hover:bg-emerald-900/20 rounded-lg" title="Дублировать"><Copy size={16} /></button>
+                  <button onClick={() => { setDraftForReuse(dialogue); navigate('/create'); }} className="p-2 text-emerald-400 hover:bg-emerald-900/20 rounded-lg" title="Дублировать"><Copy size={16} /></button>
                   <button onClick={() => { if(confirm('Удалить?')) void deleteDialogue(dialogue.id) }} className="p-2 text-red-400 hover:bg-red-900/20 rounded-lg" title="Удалить"><Trash2 size={16} /></button>
                 </div>
               </div>
