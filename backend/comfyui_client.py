@@ -22,7 +22,7 @@ class ComfyUIClient:
         except Exception as e:
             raise Exception(f"Workflow load error: {e}")
     
-    async def generate_image(self, prompt: str, negative_prompt: str = "", seed: Optional[int] = None, width: int = 1280, height: int = 720) -> dict:
+    async def generate_image(self, prompt: str, negative_prompt: str = "", seed: Optional[int] = None, width: int = 1280, height: int = 720, subfolder: str = "") -> dict:
         workflow = json.loads(json.dumps(self.workflow))
         
         if "21" in workflow: 
@@ -46,7 +46,8 @@ class ComfyUIClient:
                 prompt_id = response.json().get("prompt_id")
                 if not prompt_id: raise Exception("No prompt_id in response")
                 
-                image_path = await self._wait_for_completion(prompt_id)
+                # Передаем subfolder в ожидание и сохранение
+                image_path = await self._wait_for_completion(prompt_id, subfolder)
                 return {"image_path": image_path, "prompt_id": prompt_id, "seed": used_seed}
             except httpx.HTTPError as e:
                 raise Exception(f"ComfyUI HTTP error: {e}")
@@ -58,7 +59,7 @@ class ComfyUIClient:
         except Exception as e:
             print(f"Failed to interrupt ComfyUI: {e}")
     
-    async def _wait_for_completion(self, prompt_id: str) -> str:
+    async def _wait_for_completion(self, prompt_id: str, subfolder: str = "") -> str:
         start_time = asyncio.get_event_loop().time()
         async with httpx.AsyncClient(timeout=10) as client:
             while True:
@@ -77,7 +78,7 @@ class ComfyUIClient:
                                     if images:
                                         img_info = images[0]
                                         image_data = await self._download_image(img_info["filename"], img_info.get("type", "output"), img_info.get("subfolder", ""))
-                                        return await self._save_image(image_data, prompt_id)
+                                        return await self._save_image(image_data, prompt_id, subfolder)
                 except httpx.HTTPError: pass
                 await asyncio.sleep(1)
     
@@ -88,11 +89,21 @@ class ComfyUIClient:
             response.raise_for_status()
             return response.content
     
-    async def _save_image(self, image_data: bytes, prompt_id: str) -> str:
-        os.makedirs(self.gallery_path, exist_ok=True)
+    async def _save_image(self, image_data: bytes, prompt_id: str, subfolder: str) -> str:
+        # Формируем полный путь с учетом подпапки
+        target_dir = os.path.join(self.gallery_path, subfolder) if subfolder else self.gallery_path
+        os.makedirs(target_dir, exist_ok=True)
+        
         filename = f"scene_{prompt_id}.png"
-        filepath = os.path.join(self.gallery_path, filename)
-        with open(filepath, 'wb') as f: f.write(image_data)
+        filepath = os.path.join(target_dir, filename)
+        
+        with open(filepath, 'wb') as f: 
+            f.write(image_data)
+        
+        # Формируем корректный URL для БД (убираем возможные двойные слеши)
+        clean_subfolder = subfolder.strip("/")
+        if clean_subfolder:
+            return f"/gallery/{clean_subfolder}/{filename}"
         return f"/gallery/{filename}"
     
     async def is_available(self) -> bool:

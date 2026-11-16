@@ -5,6 +5,7 @@ from typing import List, Dict, Optional
 from config import config
 from ollama_settings import ollama_settings
 from utils import extract_json_from_text
+from logger import log_event
 
 class OllamaClient:
     def __init__(self):
@@ -31,9 +32,7 @@ class OllamaClient:
         """Проверяет, не началось ли зацикливание (повторение текста)"""
         if len(text) < 300:
             return False
-        # Берем последние 100 символов
         chunk = text[-100:]
-        # Если этот же кусок был 200 символов назад и 300 символов назад — это цикл
         if text[-200:-100] == chunk and text[-300:-200] == chunk:
             return True
         return False
@@ -54,7 +53,6 @@ class OllamaClient:
         try:
             parsed = extract_json_from_text(content)
         except Exception as e:
-            # Если парсинг не удался (например, оборвалось из-за цикла), возвращаем сырой текст
             parsed = {"blocks": [{"speaker": "narrator", "text": content}], "image_prompt": ""}
             
         if not parsed.get("blocks"):
@@ -70,13 +68,16 @@ class OllamaClient:
         payload = {
             "model": model,
             "messages": full_messages,
-            "stream": True, # ВКЛЮЧАЕМ СТРИМИНГ ДЛЯ ДЕТЕКЦИИ ЦИКЛОВ
+            "stream": True,
             "format": "json",
             "options": options,
         }
 
         content = ""
         thinking = ""
+
+        # Логируем начало запроса
+        await log_event("ollama_request", {"model": model, "messages": full_messages})
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
@@ -87,31 +88,37 @@ class OllamaClient:
                         data = json.loads(line)
                         msg = data.get("message", {})
                         
-                        # Собираем thinking (если есть)
                         if msg.get("thinking"):
                             thinking += msg["thinking"]
+                            await log_event("ollama_thinking_chunk", {"text": msg["thinking"]}) # Логируем "размышления"
                         
-                        # Собираем контент
                         if msg.get("content"):
                             content += msg["content"]
-                            # ПРОВЕРКА НА ЗАЦИКЛИВАНИЕ
+                            await log_event("ollama_content_chunk", {"text": msg["content"]}) # Логируем куски текста
+                            
                             if self._check_loop(content):
-                                print("⚠️ Loop detected in Ollama! Aborting generation.")
-                                # Принудительно рвем соединение
+                                await log_event("ollama_error", {"message": "Обнаружено зацикливание! Генерация прервана."})
                                 await response.aclose()
                                 raise Exception("Model generation loop detected. Aborted.")
                         
                         if data.get("done"):
                             break
+                
+                # Логируем успешный финал
+                await log_event("ollama_response", {"content": content, "thinking": thinking})
                 return content, thinking
             except httpx.TimeoutException:
+                await log_event("ollama_error", {"message": f"Timeout after {self.timeout}s"})
                 raise Exception(f"Ollama timeout after {self.timeout}s")
             except httpx.HTTPError as e:
+                await log_event("ollama_error", {"message": str(e)})
                 raise Exception(f"Ollama HTTP error: {e}")
 
     async def _chat_openai_compatible(self, full_messages, model, options) -> str:
-        # Оставляем без изменений (стриминг для API не критичен для локальных нужд)
         if not self.api_key: raise Exception("API key is not set")
+        
+        await log_event("ollama_request", {"model": model, "messages": full_messages})
+        
         payload = {
             "model": model, "messages": full_messages, "stream": False,
             "response_format": {"type": "json_object"}, "temperature": options.get("temperature"), "top_p": options.get("top_p"),
@@ -121,8 +128,12 @@ class OllamaClient:
                 response = await client.post(f"{self.url}/v1/chat/completions", json=payload, headers=self._headers())
                 response.raise_for_status()
                 data = response.json()
-                return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                
+                await log_event("ollama_response", {"content": content, "thinking": ""})
+                return content
             except httpx.HTTPError as e:
+                await log_event("ollama_error", {"message": str(e)})
                 raise Exception(f"Ollama API HTTP error: {e}")
 
     async def is_available(self) -> bool:

@@ -26,7 +26,10 @@ class Config:
     # Storage
     GALLERY_PATH = os.getenv("GALLERY_PATH", "./gallery")
     AVATARS_PATH = os.getenv("AVATARS_PATH", "./avatars")
-    
+    GALLERY_CARDS_WORLDS = os.path.join(GALLERY_PATH, "cards", "worlds")
+    GALLERY_CARDS_CHARACTERS = os.path.join(GALLERY_PATH, "cards", "characters")
+    GALLERY_NARRATIVE = os.path.join(GALLERY_PATH, "Narrative")
+    GALLERY_AVATARS = os.path.join(GALLERY_PATH, "avatars")
     # Server
     HOST = os.getenv("HOST", "0.0.0.0")
     PORT = int(os.getenv("PORT", "8000"))

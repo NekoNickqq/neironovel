@@ -55,6 +55,7 @@ class DialogueSettings(Base):
     character_cards = Column(JSON, default=list) 
     font_config = Column(JSON, default=lambda: {"narrator": "Cinzel, Georgia, serif", "user": "Inter, sans-serif", "hero": "Roboto, sans-serif", "sidekick": "Open Sans, sans-serif"})
     ai_controls_user = Column(Boolean, default=False)
+    story_mode = Column(String, default="simple")
     
     dialogue = relationship("Dialogue", back_populates="settings")
 
