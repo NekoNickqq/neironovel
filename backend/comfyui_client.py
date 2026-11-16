@@ -25,17 +25,12 @@ class ComfyUIClient:
     async def generate_image(self, prompt: str, negative_prompt: str = "", seed: Optional[int] = None, width: int = 1280, height: int = 720) -> dict:
         workflow = json.loads(json.dumps(self.workflow))
         
-        # Узел 21 - Positive Prompt
         if "21" in workflow: 
             workflow["21"]["inputs"]["text"] = prompt
             
-        # Узел 20 - Negative Prompt
         if "20" in workflow:
-            base_neg = workflow["20"]["inputs"].get("text", "")
-            if negative_prompt:
-                workflow["20"]["inputs"]["text"] = f"{base_neg}, {negative_prompt}"
+            workflow["20"]["inputs"]["text"] = negative_prompt
                 
-        # Узел 5 - Размеры картинки
         if "5" in workflow:
             workflow["5"]["inputs"]["width"] = width
             workflow["5"]["inputs"]["height"] = height

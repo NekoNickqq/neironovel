@@ -36,6 +36,15 @@ export function Catalog() {
     );
   }, [items, searchQuery, tab]);
 
+  const handleOpenCard = (id: string, type: 'world' | 'character', newTab: boolean = false) => {
+    const url = `/catalog/${type}/${id}`;
+    if (newTab) {
+      window.open(`${url}?returnTo=/catalog`, '_blank');
+    } else {
+      navigate(url, { state: { returnTo: '/catalog' } });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-950 relative flex flex-col">
       <button onClick={() => navigate('/')} className="absolute top-6 left-6 flex items-center gap-2 text-gray-400 hover:text-white transition-colors z-10">
@@ -90,7 +99,13 @@ export function Catalog() {
               </button>
               
               {filteredItems.map((w: any) => (
-                <CardTilt key={w.id} className="cursor-pointer w-full" onClick={() => navigate(`/catalog/world/${w.id}`)}>
+                <CardTilt 
+                  key={w.id} 
+                  className="cursor-pointer w-full" 
+                  onDoubleClick={(e) => { e.stopPropagation(); handleOpenCard(w.id, 'world', false); }}
+                  onAuxClick={(e) => { if (e.button === 1) { e.stopPropagation(); handleOpenCard(w.id, 'world', true); } }}
+                  onClick={() => handleOpenCard(w.id, 'world', false)}
+                >
                   <WorldCardView data={w} image={w.image_variants?.[w.selected_image_index]} />
                 </CardTilt>
               ))}
@@ -103,7 +118,13 @@ export function Catalog() {
               </button>
               
               {filteredItems.map((c: any) => (
-                <CardTilt key={c.id} className="cursor-pointer w-full" onClick={() => navigate(`/catalog/character/${c.id}`)}>
+                <CardTilt 
+                  key={c.id} 
+                  className="cursor-pointer w-full" 
+                  onDoubleClick={(e) => { e.stopPropagation(); handleOpenCard(c.id, 'character', false); }}
+                  onAuxClick={(e) => { if (e.button === 1) { e.stopPropagation(); handleOpenCard(c.id, 'character', true); } }}
+                  onClick={() => handleOpenCard(c.id, 'character', false)}
+                >
                   <CharacterCardView data={c} image={c.image_variants?.[c.selected_image_index]} />
                 </CardTilt>
               ))}

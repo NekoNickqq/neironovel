@@ -13,7 +13,7 @@ export function WorldCardView({ data, image }: { data: WorldCard; image: string 
         style={{ 
           top: 'clamp(2px, 2cqw, 12px)', 
           left: 'clamp(2px, 2cqw, 12px)', 
-          fontSize: 'clamp(6px, 2.5cqw, 14px)' // Уменьшили минимальный размер
+          fontSize: 'clamp(6px, 2.5cqw, 14px)' 
         }}
       >
         id {data.id ? data.id.slice(0, 6) : '000000'}
@@ -38,12 +38,13 @@ export function WorldCardView({ data, image }: { data: WorldCard; image: string 
           </h3>
         </div>
         <div 
-          className="bg-black/60 backdrop-blur-md border-t border-white/5 w-full block"
+          // ДОБАВЛЕН rounded-b-2xl, чтобы починить нижние углы при backdrop-blur
+          className="bg-black/60 backdrop-blur-md border-t border-white/5 w-full block rounded-b-2xl"
           style={{ padding: 'clamp(4px, 3cqw, 16px)' }}
         >
           <p 
             className="text-gray-200 line-clamp-3 leading-tight opacity-90"
-            style={{ fontSize: 'clamp(6px, 3.5cqw, 14px)' }} // Уменьшили минимальный размер
+            style={{ fontSize: 'clamp(6px, 3.5cqw, 14px)' }}
           >
             {data.history}
           </p>

@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import time
+import json
 import asyncio
 from datetime import datetime
 from contextlib import asynccontextmanager
@@ -10,6 +11,7 @@ from typing import List, Optional
 from utils import extract_json_from_text
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from fastapi import FastAPI, HTTPException, Depends, Request, UploadFile, File
@@ -48,6 +50,21 @@ os.makedirs(config.GALLERY_PATH, exist_ok=True)
 os.makedirs(config.AVATARS_PATH, exist_ok=True)
 app.mount("/gallery", StaticFiles(directory=config.GALLERY_PATH), name="gallery")
 app.mount("/avatars", StaticFiles(directory=config.AVATARS_PATH), name="avatars")
+
+# --- СИСТЕМА ЛОГОВ ДЛЯ ТЕРМИНАЛА ---
+log_queue = asyncio.Queue()
+
+async def log_event(event_type: str, data: dict):
+    """Отправляет лог в SSE очередь"""
+    await log_queue.put({"type": event_type, "data": data, "timestamp": datetime.utcnow().isoformat()})
+
+@app.get("/logs/stream")
+async def stream_logs():
+    async def event_generator():
+        while True:
+            log = await log_queue.get()
+            yield f"data: {json.dumps(log, ensure_ascii=False)}\n\n"
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 async def _run_with_cancel_check(request: Request, coro) -> any:
     gen_task = asyncio.create_task(coro)
@@ -116,7 +133,6 @@ class UpdateImagesRequest(BaseModel):
     image_variants: list
     selected_image_index: int
 
-# ОБНОВЛЕННЫЕ СХЕМЫ КАРТОЧЕК
 class WorldCardSchema(BaseModel):
     id: Optional[str] = None
     name: str
@@ -241,63 +257,53 @@ async def delete_card(card_type: str, card_id: str, db: Session = Depends(get_db
 
 @app.post("/generate_negative")
 async def generate_negative(req: GenerateNegativeRequest):
-    if req.type == "world":
-        prompt = f"Create a comma-separated list of negative tags in English for a world. World: {req.data.get('name')}. History: {req.data.get('history')}. Features: {req.data.get('features')}. Appearance: {req.data.get('appearance')}. What should NOT be in this world? Return ONLY the tags separated by commas. Do not use JSON, quotes, or colons."
-        
-        try:
-            res = await ollama_client.chat([{"role": "user", "content": prompt}], "You are a prompt engineer. Output ONLY the requested format.")
+    try:
+        if req.type == "world":
+            prompt = f"Create a short comma-separated list of negative visual tags in English for a world. World: {req.data.get('name')}. Description: {req.data.get('history')}. Output ONLY the tags."
+            
+            res = await ollama_client.chat([{"role": "user", "content": prompt}], "You are a machine. Output ONLY comma-separated tags. No conversation.", temperature=0.1)
             raw = res.get("raw", "")
             
-            # Если LLM всё равно выдала JSON, пытаемся достать текст
             if raw.strip().startswith('{'):
                 try:
                     parsed = extract_json_from_text(raw)
                     raw = str(list(parsed.values())[0]) if parsed else raw
-                except:
-                    pass
+                except: pass
                     
             text = re.sub(r'[^a-zA-Z0-9,\s]', '', raw)
             tags = [t.strip() for t in text.split(',') if t.strip()]
             unique_tags = list(dict.fromkeys(tags))
             return {"negative": ", ".join(unique_tags)}
-        except Exception as e:
-            raise HTTPException(500, str(e))
             
-    else:
-        # Для персонажа используем строгий JSON
-        prompt = f"""Create negative tags in English for a character. 
-Name: {req.data.get('name')}. 
-Appearance: {req.data.get('appearance')}. 
-Personality: {req.data.get('personality')}. 
+        else:
+            prompt = f"""Create negative tags in English for a character. 
+Name: {req.data.get('name')}. Appearance: {req.data.get('appearance')}. Personality: {req.data.get('personality')}. 
 Return a JSON object with exactly two keys: "negative_appearance" and "negative_personality". 
-The values should be comma-separated strings of tags.
-Example format: {{"negative_appearance": "old, short hair", "negative_personality": "obedient, dull"}}"""
-        
-        try:
-            res = await ollama_client.chat([{"role": "user", "content": prompt}], "You are a prompt engineer. Output ONLY valid JSON.")
-            raw = res.get("raw", "")
+Example: {{"negative_appearance": "old, short", "negative_personality": "dull"}}"""
             
-            # Используем умный парсер, который уже есть в проекте
+            res = await ollama_client.chat([{"role": "user", "content": prompt}], "Output ONLY valid JSON.", temperature=0.1)
+            raw = res.get("raw", "")
             data = extract_json_from_text(raw)
             
-            neg_app = data.get("negative_appearance") or data.get("appearance") or ""
-            neg_pers = data.get("negative_personality") or data.get("personality") or ""
+            neg_app = data.get("negative_appearance") or ""
+            neg_pers = data.get("negative_personality") or ""
             
-            # Если LLM выдала полную чушь, делаем fallback
             if not neg_app and not neg_pers:
                 text = re.sub(r'[^a-zA-Z0-9,\s]', '', raw)
                 return {"negative_appearance": text, "negative_personality": text}
                 
-            # Финальная очистка от мусора
             neg_app = re.sub(r'[^a-zA-Z0-9,\s]', '', str(neg_app))
             neg_pers = re.sub(r'[^a-zA-Z0-9,\s]', '', str(neg_pers))
             
             return {"negative_appearance": neg_app, "negative_personality": neg_pers}
-            
-        except Exception as e:
-            print(f"JSON parse failed: {e}, raw was: {raw}")
-            text = re.sub(r'[^a-zA-Z0-9,\s]', '', raw)
-            return {"negative_appearance": text, "negative_personality": text}
+    except Exception as e:
+        # ЗАЩИТНЫЙ МЕХАНИЗМ (Fallback): если Оллама упала или зациклилась
+        print(f"⚠️ Ошибка генерации негатива: {e}")
+        base_neg = "ugly, blurry, low quality, deformed, worst quality, low resolution, watermark, text, signature, sketch"
+        if req.type == "world":
+            return {"negative": base_neg + ", human, character, person"}
+        else:
+            return {"negative_appearance": base_neg + ", bad anatomy", "negative_personality": "dull, boring, passive"}
 
 @app.post("/catalog/upload_image")
 async def upload_image(file: UploadFile = File(...)):
@@ -313,10 +319,20 @@ async def upload_image(file: UploadFile = File(...)):
 @app.post("/catalog/generate_image")
 async def generate_card_image(req: GenerateCardImageRequest):
     try:
+        clean_negative_words = ["ugly", "blurry", "low quality", "deformed", "bad anatomy", "worst quality", "sketch"]
+        tags = [t.strip() for t in req.prompt.split(',') if t.strip()]
+        
+        clean_tags = []
+        for tag in tags:
+            if not any(bad_word in tag.lower() for bad_word in clean_negative_words):
+                clean_tags.append(tag)
+                
+        final_prompt = ", ".join(clean_tags)
+
         if req.type == "world":
-            res = await comfyui_client.generate_image(req.prompt, req.negative_prompt, width=1280, height=720)
+            res = await comfyui_client.generate_image(final_prompt, req.negative_prompt, width=1280, height=720)
         else:
-            res = await comfyui_client.generate_image(req.prompt, req.negative_prompt, width=720, height=1680)
+            res = await comfyui_client.generate_image(final_prompt, req.negative_prompt, width=720, height=1680)
             
         return {"image_path": res["image_path"]}
     except Exception as e:

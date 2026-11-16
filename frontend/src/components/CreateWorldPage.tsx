@@ -2,9 +2,10 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../api';
 import { useApp } from '../store';
-import { ArrowLeft, Sparkles, Save } from 'lucide-react';
+import { ArrowLeft, Sparkles, Save, Terminal } from 'lucide-react'; // <-- ДОБАВЛЕН Terminal
 import { MiniCatalog } from './MiniCatalog';
 import { ImageCreationPanel } from './ImageCreationPanel';
+import { TerminalModal } from './TerminalModal'; // <-- ДОБАВЛЕН ИМПОРТ
 
 export function CreateWorldPage() {
   const { refreshCatalog } = useApp(); 
@@ -15,6 +16,10 @@ export function CreateWorldPage() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  
+  // НОВОЕ СОСТОЯНИЕ ДЛЯ ТЕРМИНАЛА
+  const [showTerminal, setShowTerminal] = useState(false);
+
   const [w, setW] = useState({ 
     name: duplicateData ? duplicateData.name + " (Копия)" : '', 
     history: duplicateData ? duplicateData.history : '', 
@@ -95,24 +100,30 @@ export function CreateWorldPage() {
   };
 
   const openImagePanel = () => {
+    const basePositive = "best resolution, best quality, ultra detailed, masterpiece, scenery, ";
+    const baseNegative = "blurry, low quality, deformed, worst quality, low resolution, watermark, jpeg artifacts, sketch, ";
+
     if (!imgPrompt.trim()) {
-      // Для мира без "cute"
-      setImgPrompt((w.appearance || '') + ", best resolution, best quality, masterpiece");
+      setImgPrompt(basePositive + (w.appearance || ''));
     }
     if (!imgNegative.trim()) {
-      // Для мира без "bad anatomy"
-      setImgNegative((w.negative_prompt || '') + ", bad quality, bad resolution, ugly");
+      setImgNegative(baseNegative + (w.negative_prompt || ''));
     }
     setRightPanelMode('image');
   };
 
   return (
-    <div className="h-screen bg-gray-950 flex flex-col overflow-hidden">
+    <div className="h-screen bg-gray-950 flex flex-col overflow-hidden relative">
       <div className="flex items-center justify-between p-4 bg-gray-900 border-b border-gray-800 shrink-0">
         <button onClick={() => navigate(returnTo)} className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors">
           <ArrowLeft size={20} /> Назад
         </button>
         <div className="flex gap-3">
+          {/* НОВАЯ КНОПКА ЛОГОВ */}
+          <button onClick={() => setShowTerminal(true)} className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl font-medium transition-all">
+            <Terminal size={16} /> Логи
+          </button>
+
           <button onClick={handleGenerateNegative} disabled={loading || !isWorldValid} className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-800 disabled:text-gray-600 rounded-xl font-medium transition-all">
             <Sparkles size={16} /> Негатив
           </button>
@@ -208,6 +219,9 @@ export function CreateWorldPage() {
           )}
         </div>
       </div>
+
+      {/* РЕНДЕР МОДАЛКИ ЛОГОВ */}
+      {showTerminal && <TerminalModal onClose={() => setShowTerminal(false)} />}
     </div>
   );
 }

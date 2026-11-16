@@ -15,7 +15,7 @@
   },
   "20": {
     "inputs": {
-      "text": "ugly, blurry, low quality, deformed, bad anatomy, bad hands, extra fingers, mutated, disfigured, worst quality, low resolution, badly drawn, watermark, text, signature, cropped, jpeg artifacts, sketch",
+      "text": "",
       "clip": ["41", 1]
     },
     "class_type": "CLIPTextEncode"

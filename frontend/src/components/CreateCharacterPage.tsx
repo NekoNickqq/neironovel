@@ -2,9 +2,10 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../api';
 import { useApp } from '../store';
-import { ArrowLeft, Sparkles, Save } from 'lucide-react';
+import { ArrowLeft, Sparkles, Save, Terminal } from 'lucide-react'; // <-- ДОБАВЛЕН Terminal
 import { MiniCatalog } from './MiniCatalog';
 import { ImageCreationPanel } from './ImageCreationPanel';
+import { TerminalModal } from './TerminalModal';
 
 export function CreateCharacterPage() {
   const { refreshCatalog } = useApp(); 
@@ -16,6 +17,9 @@ export function CreateCharacterPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   
+  // НОВОЕ СОСТОЯНИЕ ДЛЯ ТЕРМИНАЛА
+  const [showTerminal, setShowTerminal] = useState(false);
+
   const [c, setC] = useState({ 
     name: duplicateData ? duplicateData.name + " (Копия)" : '', 
     appearance: duplicateData ? duplicateData.appearance : '', 
@@ -29,7 +33,7 @@ export function CreateCharacterPage() {
 
   const [activeField, setActiveField] = useState<keyof typeof c | null>(null);
   const [rightPanelMode, setRightPanelMode] = useState<'catalog' | 'image'>('catalog');
-  const [isLocked, setIsLocked] = useState(false); // Замочек
+  const [isLocked, setIsLocked] = useState(false); 
 
   const [imgPrompt, setImgPrompt] = useState('');
   const [imgNegative, setImgNegative] = useState('');
@@ -66,7 +70,7 @@ export function CreateCharacterPage() {
 
   const handleFocus = (field: keyof typeof c) => {
     setActiveField(field);
-    if (!isLocked) setRightPanelMode('catalog'); // Если не заблокировано, кидаем на каталог
+    if (!isLocked) setRightPanelMode('catalog'); 
   };
 
   const handleSelectCard = (card: any) => {
@@ -96,22 +100,30 @@ export function CreateCharacterPage() {
   };
 
   const openImagePanel = () => {
+    const basePositive = "solo, best resolution, best quality, ultra detailed, masterpiece, cute, ";
+    const baseNegative = "ugly, blurry, low quality, deformed, bad anatomy, mutated, disfigured, worst quality, low resolution, watermark, text, signature, jpeg artifacts, sketch, multiple people, extra characters, ";
+
     if (!imgPrompt.trim()) {
-      setImgPrompt((c.appearance || '') + ", best resolution, best quality, masterpiece, cute");
+      setImgPrompt(basePositive + (c.appearance || ''));
     }
     if (!imgNegative.trim()) {
-      setImgNegative((c.negative_appearance || '') + ", bad anatomy, bad quality, bad resolution, ugly");
+      setImgNegative(baseNegative + (c.negative_appearance || ''));
     }
     setRightPanelMode('image');
   };
 
   return (
-    <div className="h-screen bg-gray-950 flex flex-col overflow-hidden">
+    <div className="h-screen bg-gray-950 flex flex-col overflow-hidden relative">
       <div className="flex items-center justify-between p-4 bg-gray-900 border-b border-gray-800 shrink-0">
         <button onClick={() => navigate(returnTo)} className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors">
           <ArrowLeft size={20} /> Назад
         </button>
         <div className="flex gap-3">
+          {/* НОВАЯ КНОПКА ЛОГОВ */}
+          <button onClick={() => setShowTerminal(true)} className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl font-medium transition-all">
+            <Terminal size={16} /> Логи
+          </button>
+          
           <button onClick={handleGenerateNegative} disabled={loading || !isCharValid} className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-800 disabled:text-gray-600 rounded-xl font-medium transition-all">
             <Sparkles size={16} /> Негатив
           </button>
@@ -208,6 +220,9 @@ export function CreateCharacterPage() {
           )}
         </div>
       </div>
+
+      {/* РЕНДЕР МОДАЛКИ ЛОГОВ */}
+      {showTerminal && <TerminalModal onClose={() => setShowTerminal(false)} />}
     </div>
   );
 }
