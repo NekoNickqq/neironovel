@@ -24,8 +24,37 @@ def extract_json_from_text(text: str) -> dict:
 def generate_seed() -> int:
     return random.randint(0, 2**32 - 1)
 
-# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ПРОМПТОВ ---
+# --- ПРЕСЕТЫ ДЛЯ ГЕНЕРАЦИИ ИЗОБРАЖЕНИЙ ---
+PRESETS = {
+    "character": {
+        "pos": "best quality, best resolution, masterpiece, ultra detailed, cute, solo, close-up",
+        "neg": "bad quality, bad anatomy, bad resolution, jpeg artifacts, ugly, multiple people, extra characters"
+    },
+    "landscape": {
+        "pos": "best quality, best resolution, masterpiece, ultra detailed, scenery, no humans, landscape, wide shot",
+        "neg": "bad quality, bad resolution, ugly, human, character, person, 1girl, 1boy"
+    },
+    "group": {
+        "pos": "best quality, best resolution, masterpiece, ultra detailed, multiple characters, dynamic composition",
+        "neg": "bad quality, bad anatomy, bad resolution, jpeg artifacts, ugly, deformed"
+    },
+    "action": {
+        "pos": "best quality, best resolution, masterpiece, ultra detailed, dynamic angle, motion blur, action shot",
+        "neg": "bad quality, bad anatomy, bad resolution, jpeg artifacts, ugly, static pose"
+    }
+}
 
+def apply_presets(image_prompt: str, negative_prompt: str, scene_type: str) -> tuple[str, str]:
+    """Добавляет теги из пресета к промптам"""
+    preset = PRESETS.get(scene_type, PRESETS["character"])
+    
+    # Очищаем от возможных дублей
+    final_pos = f"{image_prompt.strip()}, {preset['pos']}"
+    final_neg = f"{negative_prompt.strip()}, {preset['neg']}".strip(", ")
+    
+    return final_pos, final_neg
+
+# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 def _get_context(world_data: dict, character_cards: list):
     w_name = world_data.get("name", "Безымянный мир")
     w_hist = world_data.get("history", "")
@@ -36,7 +65,7 @@ def _get_context(world_data: dict, character_cards: list):
     world_context = f"МИР: {w_name}\n"
     if w_hist: world_context += f"История: {w_hist}\n"
     if w_feat: world_context += f"Особенности: {w_feat}\n"
-    if w_app: world_context += f"Внешний вид (стиль): {w_app}\n"
+    if w_app: world_context += f"Визуальный стиль: {w_app}\n"
     if w_neg: world_context += f"НЕДОПУСТИМО: {w_neg}\n"
 
     chars_text = ""
@@ -56,7 +85,7 @@ def build_simple_prompt(world_data, character_cards, ai_controls_user):
     world_context, chars_text, w_app, w_neg = _get_context(world_data, character_cards)
     user_instruction = "ВАЖНО: Ты можешь переписывать реплики пользователя в более литературной форме.\n" if ai_controls_user else ""
     
-    return f"""Ты — мастер интерактивных визуальных новелл и опытный промпт-инженер.
+    return f"""Ты — мастер интерактивных визуальных новелл.
 КОНТЕКСТ МИРА:
 {world_context}
 ПЕРСОНАЖИ:
@@ -72,7 +101,8 @@ def build_simple_prompt(world_data, character_cards, ai_controls_user):
 {{
   "blocks": [{{"speaker": "narrator", "text": "*описание*"}}],
   "image_prompt": "detailed scene, {w_app}",
-  "negative_prompt": "{w_neg}"
+  "negative_prompt": "{w_neg}",
+  "scene_type": "character"
 }}"""
 
 def build_realistic_prompt(world_data, character_cards, ai_controls_user):
@@ -88,51 +118,45 @@ def build_realistic_prompt(world_data, character_cards, ai_controls_user):
 {chars_text if chars_text else "Нет заданных персонажей."}
 {user_instruction}
 
-ПРАВИЛА РЕАЛИЗМА:
-1. НИКОГДА не соглашайся со всем подряд. Если действие пользователя противоречит характеру персонажа — он должен отказать, возмутиться или испугаться.
-2. У персонажей есть личное пространство и чувство собственного достоинства. Они не обязаны быть милыми.
-3. Реагируй на действия пользователя естественно: если он грубит — злись, если делает комплимент — смущайся.
-4. Используй внутренние монологи (speaker: narrator) чтобы показать скрытые эмоции.
-5. Не подыгрывай пользователю, если он пытается сломать логику мира.
-6. Стиль картинок: {w_app}
+ПРАВИЛА РЕАЛИЗМА (КРИТИЧЕСКИ ВАЖНО):
+1. НИКОГДА не соглашайся со всем подряд. Если действие пользователя противоречит характеру — откажи или возмутись.
+2. У персонажей есть личное пространство. Они не обязаны быть милыми.
+3. Реагируй на действия пользователя естественно (грубит — злись, комплимент — смущайся).
+
+ПРАВИЛА ХАРАКТЕРА (САМОЕ ВАЖНОЕ):
+1. Строго следуй полю "Характер" из карточки персонажа.
+2. Строго соблюдай поле "ПО ХАРАКТЕРУ НЕ ДОЛЖЕН БЫТЬ". Если персонаж "грубый", он НЕ БУДЕТ обниматься, даже если пользователь просит. Если персонаж "застенчивый", он НЕ БУДЕТ громко кричать.
+3. Характер персонажа — это его железобетонный закон. Он не меняется по щелчку пальцев.
+
+ПРАВИЛА ДЛЯ ВИЗУАЛЬНОГО ПРОМПТА:
+1. image_prompt должен быть ОЧЕНЬ детальным, на английском.
+2. ОБЯЗАТЕЛЬНО используй детали внешности персонажей из карточек (цвет глаз, одежда, волосы, особенности).
+3. Если пользователь смотрит на объект или взаимодействует с ним, напиши "close-up on [объект]", "focus on [объект]".
+4. ОБЯЗАТЕЛЬНО описывай эмоции на лице и в позе персонажа (например, "angry expression", "smiling", "teary eyes").
+5. НЕ КОПИРУЙ негативный промпт мира в negative_prompt. Создавай negative_prompt на основе того, что НЕ должно быть в этой конкретной сцене.
+6. Выбери подходящий пресет для сцены:
+   - "character" (если в кадре один персонаж)
+   - "landscape" (если это просто пейзаж без людей)
+   - "group" (если несколько персонажей)
+   - "action" (если происходит динамичное действие)
 
 ФОРМАТ ОТВЕТА (СТРОГО JSON):
 {{
   "blocks": [{{"speaker": "narrator", "text": "*описание*"}}],
-  "image_prompt": "detailed scene, {w_app}",
-  "negative_prompt": "{w_neg}"
+  "image_prompt": "detailed scene description in English focusing on appearance and emotions",
+  "negative_prompt": "specific things to avoid in this scene",
+  "scene_type": "character" 
 }}"""
 
 def build_game_prompt(world_data, character_cards, ai_controls_user):
+    # Пока оставляем как было, но добавим scene_type для совместимости
     world_context, chars_text, w_app, w_neg = _get_context(world_data, character_cards)
-    user_instruction = "ВАЖНО: Ты можешь переписывать реплики пользователя в более литературной форме.\n" if ai_controls_user else ""
-    
-    return f"""Ты — Гейммастер текстовой RPG с глубокой симуляцией.
-КОНТЕКСТ МИРА:
-{world_context}
-ПЕРСОНАЖИ:
-{chars_text if chars_text else "Нет заданных персонажей."}
-{user_instruction}
-
-ПРАВИЛА RPG:
-1. Реагируй реалистично (как в режиме "Реалистичный").
-2. Отслеживай скрытую статистику. Оскорбления понижают отношения, комплименты повышают.
-3. Возвращай в JSON скрытый блок "game_state" (настроение и прогресс отношений).
-
-ФОРМАТ ОТВЕТА (СТРОГО JSON):
-{{
-  "blocks": [{{"speaker": "narrator", "text": "*описание*"}}],
-  "game_state": {{
-    "mood": "angry | happy | neutral | sad",
-    "relationship_progress": 15,
-    "relationship_status": "Незнакомцы"
-  }},
-  "image_prompt": "detailed scene, {w_app}",
-  "negative_prompt": "{w_neg}"
-}}"""
+    return build_realistic_prompt(world_data, character_cards, ai_controls_user).replace(
+        '"scene_type": "character"', 
+        '"scene_type": "character",\n  "game_state": {"mood": "neutral", "relationship_progress": 0}'
+    )
 
 def build_system_prompt(world_data: dict, character_cards: list, ai_controls_user: bool, story_mode: str = "simple") -> str:
-    """Роутер для выбора промпта в зависимости от режима истории"""
     if story_mode == "realistic":
         return build_realistic_prompt(world_data, character_cards, ai_controls_user)
     elif story_mode == "game":

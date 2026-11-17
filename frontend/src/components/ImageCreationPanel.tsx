@@ -42,7 +42,8 @@ export function ImageCreationPanel({
     setLoading(true);
     setError('');
     try {
-      const res = await api.uploadImage(file);
+      // Передаем type (он приходит в пропсах компонента: 'world' или 'character')
+      const res = await api.uploadImage(file, type); 
       onImageSaved(res.image_path!);
     } catch (err: any) {
       setError(err.message);

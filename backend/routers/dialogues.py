@@ -10,7 +10,7 @@ from datetime import datetime
 from database import get_db, Dialogue, DialogueSettings, Message
 from ollama_client import ollama_client
 from comfyui_client import comfyui_client
-from utils import build_system_prompt
+from utils import build_system_prompt, apply_presets
 from helpers import _run_with_cancel_check
 from image_utils import cleanup_orphan_images
 
@@ -118,6 +118,7 @@ async def send_message(req: SendMessageRequest, request: Request, db: Session = 
         image_path, has_image, image_variants, comfy_info = None, False, [], {}
         image_prompt = (ai_response.get("image_prompt") or "").strip()
         negative_prompt = (ai_response.get("negative_prompt") or "").strip()
+        scene_type = ai_response.get("scene_type", "character")
         prompt_source = "model"
 
         if req.generate_image:
@@ -127,12 +128,15 @@ async def send_message(req: SendMessageRequest, request: Request, db: Session = 
                 image_prompt = f"{scene_text[:400]}, {style_preset}".strip(", ")
                 prompt_source = "fallback"
 
+            # ПРИМЕНЯЕМ ПРЕСЕТЫ
+            final_pos, final_neg = apply_presets(image_prompt, negative_prompt, scene_type)
+
             t1 = time.perf_counter()
             comfy_res = await _run_with_cancel_check(
                 request, 
                 comfyui_client.generate_image(
-                    image_prompt, 
-                    negative_prompt, 
+                    final_pos, 
+                    final_neg, 
                     subfolder=f"Narrative/{req.dialogue_id}"
                 )
             )
@@ -141,12 +145,20 @@ async def send_message(req: SendMessageRequest, request: Request, db: Session = 
             has_image, image_variants = True, [image_path]
             debug_info["timings_ms"]["comfyui"] = round((time.perf_counter() - t1) * 1000)
 
-        debug_info.update({"status": "success", "image_prompt_used": image_prompt, "negative_prompt_used": negative_prompt, "image_prompt_source": prompt_source, "comfyui_info": comfy_info})
+        debug_info.update({
+            "status": "success", 
+            "image_prompt_used": final_pos if req.generate_image else image_prompt, 
+            "negative_prompt_used": final_neg if req.generate_image else negative_prompt, 
+            "scene_type_used": scene_type,
+            "image_prompt_source": prompt_source, 
+            "comfyui_info": comfy_info
+        })
+        
         assistant_message.content = ai_response.get("blocks", [])
         assistant_message.image_path = image_path
         assistant_message.image_variants = image_variants
         assistant_message.has_image = has_image
-        assistant_message.image_prompt = image_prompt
+        assistant_message.image_prompt = image_prompt # Сохраняем оригинальный промпт модели
         assistant_message.debug_info = dict(debug_info)
 
     except asyncio.CancelledError:
@@ -196,23 +208,34 @@ async def regenerate_image(req: RegenerateRequest, db: Session = Depends(get_db)
     if not message or not dialogue: raise HTTPException(404, "Not found")
     
     image_prompt = message.image_prompt
-    negative_prompt = message.debug_info.get("negative_prompt_used", "") if message.debug_info else ""
+    negative_prompt = ""
+    scene_type = "character" # Дефолтный пресет
     
     if req.mode == "new" or not image_prompt:
         history = [{"role": "user", "content": m.content[0]["text"]} if m.role == "user" else {"role": "assistant", "content": "\n".join([f"[{b['speaker']}]: {b['text']}" for b in m.content])} for m in dialogue.messages if m.id != req.message_id]
-        system_prompt = build_system_prompt(dialogue.settings.world_data, dialogue.settings.character_cards, dialogue.settings.ai_controls_user, dialogue.settings.story_mode) + "\n\nОтвечай ТОЛЬКО полями image_prompt и negative_prompt. Формат: {\"image_prompt\": \"...\", \"negative_prompt\": \"...\"}"
+        # Просим нейросеть заново описать сцену и вернуть scene_type
+        system_prompt = build_system_prompt(dialogue.settings.world_data, dialogue.settings.character_cards, dialogue.settings.ai_controls_user, dialogue.settings.story_mode) + "\n\nОтвечай ТОЛЬКО полями image_prompt, negative_prompt и scene_type. Формат: {\"image_prompt\": \"...\", \"negative_prompt\": \"...\", \"scene_type\": \"character\"}"
         try:
             ollama_res = await ollama_client.chat(history, system_prompt, model=req.model)
             image_prompt = ollama_res["parsed"].get("image_prompt", "")
             negative_prompt = ollama_res["parsed"].get("negative_prompt", "")
+            scene_type = ollama_res["parsed"].get("scene_type", "character")
         except Exception as e: raise HTTPException(500, f"Ollama error: {str(e)}")
         if not image_prompt: raise HTTPException(400, "No image prompt generated")
         message.image_prompt = image_prompt
+    else:
+        # Берем сохраненные данные из debug_info
+        neg_log = message.debug_info.get("negative_prompt_used", "") if message.debug_info else ""
+        negative_prompt = neg_log
+        scene_type = message.debug_info.get("scene_type_used", "character") if message.debug_info else "character"
     
+    # ПРИМЕНЯЕМ ПРЕСЕТЫ
+    final_pos, final_neg = apply_presets(image_prompt, negative_prompt, scene_type)
+
     try:
         comfy_res = await comfyui_client.generate_image(
-            image_prompt, 
-            negative_prompt, 
+            final_pos, 
+            final_neg, 
             subfolder=f"Narrative/{req.dialogue_id}"
         )
         new_image_path = comfy_res["image_path"]
@@ -220,11 +243,21 @@ async def regenerate_image(req: RegenerateRequest, db: Session = Depends(get_db)
     
     image_variants = message.image_variants or []
     image_variants.append(new_image_path)
+    
+    # Обновляем debug_info для этого нового варианта
+    if not message.debug_info: message.debug_info = {}
+    message.debug_info["scene_type_used"] = scene_type
+    message.debug_info["image_prompt_used"] = final_pos
+    message.debug_info["negative_prompt_used"] = final_neg
+    # Обязательно пересохраняем словарь, чтобы SQLAlchemy заметил изменения
+    message.debug_info = dict(message.debug_info)
+
     message.image_variants = image_variants
     message.selected_image_index = len(image_variants) - 1
     message.has_image = True
     message.image_path = new_image_path
     db.commit()
+    
     return {"message_id": message.id, "new_image_path": new_image_path, "variant_count": len(image_variants), "prompt_source": "new" if req.mode == "new" else "same"}
 
 @router.post("/select/image")

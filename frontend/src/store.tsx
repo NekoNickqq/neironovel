@@ -84,7 +84,7 @@ interface AppContextType {
   refreshDialogueList: () => Promise<void>;
   refreshCatalog: () => Promise<void>;
   openDialogue: (id: string) => Promise<void>;
-  createDialogue: (payload: { title: string; description: string; world_data: WorldCard; character_cards: CharacterCard[]; ai_controls_user: boolean; }) => Promise<string>;
+  createDialogue: (payload: { title: string; description: string; world_data: WorldCard; character_cards: CharacterCard[]; ai_controls_user: boolean; story_mode?: string; }) => Promise<string>;
   deleteDialogue: (id: string) => Promise<void>;
   updateDialogueSettings: (payload: { world_data?: WorldCard; character_cards?: CharacterCard[]; ai_controls_user?: boolean }) => Promise<void>;
   sendMessage: (text: string, generateImage: boolean) => Promise<void>;

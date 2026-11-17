@@ -46,6 +46,7 @@ type ApiDialogueFull = {
     character_cards?: CharacterCard[];
     font_config?: any;
     ai_controls_user?: boolean;
+    story_mode?: string; // <-- ДОБАВЛЕНО
   }; 
   messages: Message[]; 
   created_at: string;
@@ -86,6 +87,7 @@ export function normalizeDialogue(data: ApiDialogueFull): Dialogue {
       })),
       font_config: { ...DEFAULT_FONTS, ...(settings.font_config ?? {}) },
       ai_controls_user: settings.ai_controls_user ?? false,
+      story_mode: (settings.story_mode as 'simple' | 'realistic' | 'game') ?? 'simple', // <-- ДОБАВЛЕНО
     },
     messages: (data.messages ?? []).map(normalizeMessage), created_at: data.created_at,
   };
@@ -94,7 +96,7 @@ export function normalizeDialogue(data: ApiDialogueFull): Dialogue {
 export function summaryToDialogue(s: ApiDialogueSummary): Dialogue {
   return {
     id: s.id, title: s.title, description: s.description,
-    settings: { world_data: { ...DEFAULT_WORLD, name: s.description }, character_cards: [], font_config: DEFAULT_FONTS, ai_controls_user: false },
+    settings: { world_data: { ...DEFAULT_WORLD, name: s.description }, character_cards: [], font_config: DEFAULT_FONTS, ai_controls_user: false, story_mode: 'simple' },
     messages: [], created_at: s.created_at, message_count: s.message_count,
   };
 }
@@ -127,11 +129,14 @@ export const api = {
   },
   createCharacter: (body: Omit<CharacterCard, 'id' | 'color'>) => request<{ id: string }>('/catalog/characters', { method: 'POST', body: JSON.stringify(body) }),
   generateNegative: (type: 'world' | 'character', data: any) => request<{ negative: string }>('/generate_negative', { method: 'POST', body: JSON.stringify({ type, data }) }),
-  
-  uploadImage: async (file: File) => {
+  updateWorld: (id: string, body: Partial<WorldCard>) => request<{ status: string }>(`/catalog/worlds/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  updateCharacter: (id: string, body: Partial<CharacterCard>) => request<{ status: string }>(`/catalog/characters/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+
+  uploadImage: async (file: File, type: 'world' | 'character') => {
     const formData = new FormData();
     formData.append('file', file);
-    const res = await fetch(`${API_BASE}/catalog/upload_image`, { method: 'POST', body: formData });
+    // Передаем тип в query-параметре, чтобы бэкенд знал, в какую папку кидать файл
+    const res = await fetch(`${API_BASE}/catalog/upload_image?card_type=${type}`, { method: 'POST', body: formData });
     if (!res.ok) throw new Error('Ошибка загрузки');
     const data = await res.json();
     return { image_path: resolveMediaUrl(data.image_path) };
@@ -156,7 +161,7 @@ export const api = {
     const data = await request<ApiDialogueFull>(`/dialogues/${id}`);
     return normalizeDialogue(data);
   },
-  createDialogue: async (body: { title: string; description?: string; world_data: WorldCard; character_cards: CharacterCard[]; ai_controls_user: boolean; }) => {
+  createDialogue: async (body: { title: string; description?: string; world_data: WorldCard; character_cards: CharacterCard[]; ai_controls_user: boolean; story_mode?: string; }) => {
     const { dialogue_id } = await request<{ dialogue_id: string }>('/dialogues', { method: 'POST', body: JSON.stringify(body) });
     return api.getDialogue(dialogue_id);
   },

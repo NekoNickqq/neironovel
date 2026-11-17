@@ -23,9 +23,7 @@ function DraggableCharacterCard({ char, isSelectedForRemove, onClick, isDragging
       onDoubleClick={(e) => { e.stopPropagation(); onOpen(); }}
       onMouseDown={(e) => { 
         if (e.button === 1) { 
-          e.preventDefault(); 
-          e.stopPropagation(); 
-          onOpenNewTab(); 
+          e.preventDefault(); e.stopPropagation(); onOpenNewTab(); 
         } 
       }}
       className={`cursor-grab active:cursor-grabbing outline-none transition-all rounded-2xl relative p-1 ${
@@ -83,19 +81,23 @@ export function CreateDialogue() {
   const [selectedWorldId, setSelectedWorldId] = useState(savedData?.selectedWorldId || draft?.settings.world_data?.id || '');
   const [selectedCharIds, setSelectedCharIds] = useState<string[]>(savedData?.selectedCharIds || draft?.settings.character_cards?.map(c => c.id) || []);
   const [aiControlsUser, setAiControlsUser] = useState(savedData?.aiControlsUser ?? (draft ? draft.settings.ai_controls_user : false));
-  const [submitting, setSubmitting] = useState(false);
+  
+  // Стейт для режима истории
+  const [storyMode, setStoryMode] = useState<'simple' | 'realistic' | 'game'>(
+    savedData?.storyMode || draft?.settings.story_mode || 'simple'
+  );
 
+  const [submitting, setSubmitting] = useState(false);
   const [activeCatalog, setActiveCatalog] = useState<'world' | 'characters' | null>(null);
   const [tempCharIds, setTempCharIds] = useState<string[]>([]);
-
   const [activeId, setActiveId] = useState<string | null>(null);
   const [selectedToRemove, setSelectedToRemove] = useState<string[]>([]);
 
   useEffect(() => {
     sessionStorage.setItem('createDialogueDraft', JSON.stringify({
-      title, description, selectedWorldId, selectedCharIds, aiControlsUser
+      title, description, selectedWorldId, selectedCharIds, aiControlsUser, storyMode
     }));
-  }, [title, description, selectedWorldId, selectedCharIds, aiControlsUser]);
+  }, [title, description, selectedWorldId, selectedCharIds, aiControlsUser, storyMode]);
 
   useEffect(() => {
     if (location.state?.newCardId) {
@@ -119,7 +121,12 @@ export function CreateDialogue() {
 
     setSubmitting(true);
     try {
-      const newId = await createDialogue({ title, description, world_data, character_cards, ai_controls_user: aiControlsUser });
+      // Передаем storyMode
+      const newId = await createDialogue({ 
+        title, description, world_data, character_cards, 
+        ai_controls_user: aiControlsUser, 
+        story_mode: storyMode 
+      });
       sessionStorage.removeItem('createDialogueDraft');
       if (newId) navigate('/chat/' + newId); 
     } finally {
@@ -133,37 +140,25 @@ export function CreateDialogue() {
     navigate('/'); 
   };
 
-  const handleSelectWorld = (world: any) => {
-    setSelectedWorldId(world.id);
-    setActiveCatalog(null); // Закрываем каталог при выборе мира
-  };
-
-  const handleRemoveWorld = () => {
-    setSelectedWorldId(''); // Не закрываем каталог при удалении
-  };
+  const handleSelectWorld = (world: any) => { setSelectedWorldId(world.id); setActiveCatalog(null); };
+  const handleRemoveWorld = () => { setSelectedWorldId(''); };
 
   const handleSelectChar = (char: any, isMulti?: boolean) => {
     if (isMulti) {
-      setTempCharIds(prev => 
-        prev.includes(char.id) ? prev.filter(id => id !== char.id) : [...prev, char.id]
-      );
+      setTempCharIds(prev => prev.includes(char.id) ? prev.filter(id => id !== char.id) : [...prev, char.id]);
     } else {
       setSelectedCharIds(prev => [...prev, char.id]);
-      setActiveCatalog(null); // Закрываем каталог при обычном клике на нового персонажа
+      setActiveCatalog(null);
     }
   };
 
   const handleRemoveChar = (char: any) => {
     setSelectedCharIds(prev => prev.filter(id => id !== char.id));
     setTempCharIds(prev => prev.filter(id => id !== char.id));
-    // Каталог не закрывается при клике на тусклую карточку
   };
 
   const handleAddSelectedChars = () => {
-    setSelectedCharIds(prev => {
-      const newIds = new Set([...prev, ...tempCharIds]);
-      return Array.from(newIds);
-    });
+    setSelectedCharIds(prev => Array.from(new Set([...prev, ...tempCharIds])));
     setTempCharIds([]);
     setActiveCatalog(null);
   };
@@ -171,13 +166,9 @@ export function CreateDialogue() {
   const handleCardClick = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (e.shiftKey) {
-      setSelectedToRemove(prev => 
-        prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-      );
+      setSelectedToRemove(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
     } else {
-      setSelectedToRemove(prev => 
-        prev.includes(id) && prev.length === 1 ? [] : [id]
-      );
+      setSelectedToRemove(prev => prev.includes(id) && prev.length === 1 ? [] : [id]);
     }
   };
 
@@ -198,7 +189,6 @@ export function CreateDialogue() {
 
   const selectedWorld = state.worlds.find(w => w.id === selectedWorldId);
   const selectedChars = state.characters.filter(c => selectedCharIds.includes(c.id));
-  
   const showTrash = activeId !== null || selectedToRemove.length > 0;
   const activeChar = selectedChars.find(c => c.id === activeId);
 
@@ -329,9 +319,40 @@ export function CreateDialogue() {
             </DragOverlay>
           </DndContext>
 
+          {/* НОВЫЙ БЛОК НАСТРОЕК ИИ И РЕЖИМА */}
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
-            <h3 className="text-lg font-semibold text-white mb-4">⚙️ Настройки ИИ</h3>
-            <label className="flex items-center gap-4 cursor-pointer group">
+            <h3 className="text-lg font-semibold text-white mb-4">⚙️ Характер истории</h3>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+              <button 
+                onClick={() => setStoryMode('simple')}
+                className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${storyMode === 'simple' ? 'border-purple-500 bg-purple-500/10' : 'border-gray-800 bg-gray-950 hover:border-gray-600'}`}
+              >
+                <span className="text-2xl mb-2">🎭</span>
+                <span className="font-bold text-white text-sm">Простой</span>
+                <span className="text-xs text-gray-500 text-center mt-1">Классическое отыгрывание</span>
+              </button>
+
+              <button 
+                onClick={() => setStoryMode('realistic')}
+                className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${storyMode === 'realistic' ? 'border-emerald-500 bg-emerald-500/10' : 'border-gray-800 bg-gray-950 hover:border-gray-600'}`}
+              >
+                <span className="text-2xl mb-2">🌍</span>
+                <span className="font-bold text-white text-sm">Реалистичный</span>
+                <span className="text-xs text-gray-500 text-center mt-1">Живые персонажи со своим мнением</span>
+              </button>
+
+              <button 
+                onClick={() => setStoryMode('game')}
+                className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${storyMode === 'game' ? 'border-amber-500 bg-amber-500/10' : 'border-gray-800 bg-gray-950 hover:border-gray-600'}`}
+              >
+                <span className="text-2xl mb-2">🎲</span>
+                <span className="font-bold text-white text-sm">Игровой (Beta)</span>
+                <span className="text-xs text-gray-500 text-center mt-1">Отслеживание отношений и настроения</span>
+              </button>
+            </div>
+
+            <label className="flex items-center gap-4 cursor-pointer group pt-4 border-t border-gray-800">
               <div className="relative flex items-center justify-center">
                 <input type="checkbox" checked={aiControlsUser} onChange={e => setAiControlsUser(e.target.checked)} className="peer sr-only" />
                 <div className="w-6 h-6 rounded border border-gray-600 bg-gray-950 peer-checked:bg-purple-600 peer-checked:border-purple-600 transition-all flex items-center justify-center">

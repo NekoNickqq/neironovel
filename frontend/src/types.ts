@@ -21,7 +21,7 @@ export interface CharacterCard {
   negative_personality: string;
   image_variants: string[];
   selected_image_index: number;
-  color?: string; // для UI
+  color?: string;
 }
 
 export interface DialogueSettings {
@@ -29,6 +29,7 @@ export interface DialogueSettings {
   character_cards: CharacterCard[];
   font_config: any;
   ai_controls_user: boolean;
+  story_mode: 'simple' | 'realistic' | 'game';
 }
 
 export interface DebugInfo { status?: string; error_message?: string; system_prompt?: string; history_sent?: any[]; model?: string; raw_response?: string; thinking?: string; timings_ms?: { ollama: number; comfyui: number }; image_prompt_used?: string; negative_prompt_used?: string; comfyui_info?: any; }
