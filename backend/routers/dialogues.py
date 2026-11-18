@@ -1,14 +1,17 @@
-from fastapi import APIRouter, HTTPException, Depends, Request, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, Request, BackgroundTasks, File, Form, UploadFile
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 import uuid
 import time
+import os
+import hashlib
 import asyncio
 from datetime import datetime
 from world_builder import generate_world_state
 
-from database import get_db, Dialogue, DialogueSettings, Message
+from database import get_db, Dialogue, DialogueSettings, Message, CharacterCard, CharacterAvatar, DialogueCharacter, sync_dialogue_characters
+from config import config
 from ollama_client import ollama_client
 from comfyui_client import comfyui_client
 from utils import build_system_prompt, apply_presets
@@ -64,6 +67,9 @@ async def create_dialogue(req: CreateDialogueRequest, background_tasks: Backgrou
     db.add(dialogue)
     db.add(settings)
     db.commit()
+
+    # Привязываем карточки персонажей к миру (одна карточка — много миров)
+    sync_dialogue_characters(db, dialogue_id, req.character_cards)
     
     # ЗАПУСКАЕМ ФОНОВУЮ ГЕНЕРАЦИЮ МИРА
     # Это не заблокирует ответ, пользователь сразу перейдет в чат
@@ -79,6 +85,10 @@ async def update_dialogue_settings(dialogue_id: str, req: UpdateDialogueSettings
     if req.character_cards is not None: settings.character_cards = req.character_cards
     if req.ai_controls_user is not None: settings.ai_controls_user = req.ai_controls_user
     db.commit()
+
+    # Пересобираем связи «мир ↔ карточки персонажей» при изменении состава персонажей
+    if req.character_cards is not None:
+        sync_dialogue_characters(db, dialogue_id, req.character_cards)
     return {"status": "updated"}
 
 @router.get("/dialogues/{dialogue_id}")
@@ -86,13 +96,30 @@ async def get_dialogue(dialogue_id: str, db: Session = Depends(get_db)):
     dialogue = db.query(Dialogue).filter(Dialogue.id == dialogue_id).first()
     if not dialogue: raise HTTPException(status_code=404, detail="Dialogue not found")
     messages = [{"id": m.id, "dialogue_id": m.dialogue_id, "role": m.role, "blocks": m.content, "image_path": m.image_path, "image_variants": m.image_variants, "selected_image_index": m.selected_image_index, "has_image": m.has_image, "image_prompt": m.image_prompt, "debug_info": m.debug_info, "text_versions": m.text_versions, "selected_version_index": m.selected_version_index, "original_user_text": m.original_user_text, "parent_id": m.parent_id, "created_at": m.created_at.isoformat()} for m in dialogue.messages]
+
+    # Аватарки, привязанные к этому миру (нужны для круглых аватарок в чате)
+    dialogue_avatars = (
+        db.query(CharacterAvatar)
+        .filter(CharacterAvatar.dialogue_id == dialogue_id)
+        .order_by(CharacterAvatar.created_at.desc())
+        .all()
+    )
+
     return {"id": dialogue.id, "title": dialogue.title, "settings": {
         "world_data": dialogue.settings.world_data if dialogue.settings else {},
         "character_cards": dialogue.settings.character_cards if dialogue.settings else [],
         "font_config": dialogue.settings.font_config if dialogue.settings else {},
         "ai_controls_user": dialogue.settings.ai_controls_user if dialogue.settings else False,
         "story_mode": dialogue.settings.story_mode if dialogue.settings else "simple",
-        "world_state": dialogue.settings.world_state if dialogue.settings else {}},
+        "world_state": dialogue.settings.world_state if dialogue.settings else {},
+        "user_avatar_path": (dialogue.settings.user_avatar_path or "") if dialogue.settings else ""},
+        "avatars": [{
+            "id": a.id,
+            "character_card_id": a.character_card_id,
+            "image_path": a.image_path,
+            "source": a.source,
+            "created_at": a.created_at.isoformat(),
+        } for a in dialogue_avatars],
         "messages": messages, "created_at": dialogue.created_at.isoformat()}
 
 @router.delete("/dialogues/{dialogue_id}")
@@ -205,7 +232,7 @@ async def send_message(req: SendMessageRequest, request: Request, db: Session = 
 async def regenerate_text(req: RegenerateRequest, db: Session = Depends(get_db)):
     message = db.query(Message).filter(Message.id == req.message_id).first()
     dialogue = db.query(Dialogue).filter(Dialogue.id == req.dialogue_id).first()
-    if not message or not dialogue: raise HTTPException(404, "Not found")
+    if not message or not dialogue or message.dialogue_id != req.dialogue_id: raise HTTPException(404, "Not found")
     
     history = [{"role": "user", "content": m.content[0]["text"]} if m.role == "user" else {"role": "assistant", "content": "\n".join([f"[{b['speaker']}]: {b['text']}" for b in m.content])} for m in dialogue.messages if m.id != req.message_id]
     last_user_msg = next((m for m in reversed(dialogue.messages) if m.role == "user" and m.id != req.message_id), None)
@@ -218,8 +245,9 @@ async def regenerate_text(req: RegenerateRequest, db: Session = Depends(get_db))
         new_blocks = ollama_res["parsed"].get("blocks", [])
     except Exception as e: raise HTTPException(500, f"Ollama error: {str(e)}")
     
-    text_versions = message.text_versions or []
-    text_versions.append(new_blocks)
+    # Безопасное создание нового списка: JSON-колонки SQLAlchemy не отслеживают
+    # in-place мутации (append), поэтому вариант не сохранился бы в БД
+    text_versions = [*(message.text_versions or []), new_blocks]
     message.text_versions = text_versions
     message.selected_version_index = len(text_versions)
     db.commit()
@@ -229,7 +257,7 @@ async def regenerate_text(req: RegenerateRequest, db: Session = Depends(get_db))
 async def regenerate_image(req: RegenerateRequest, db: Session = Depends(get_db)):
     message = db.query(Message).filter(Message.id == req.message_id).first()
     dialogue = db.query(Dialogue).filter(Dialogue.id == req.dialogue_id).first()
-    if not message or not dialogue: raise HTTPException(404, "Not found")
+    if not message or not dialogue or message.dialogue_id != req.dialogue_id: raise HTTPException(404, "Not found")
     
     image_prompt = message.image_prompt
     negative_prompt = ""
@@ -265,8 +293,9 @@ async def regenerate_image(req: RegenerateRequest, db: Session = Depends(get_db)
         new_image_path = comfy_res["image_path"]
     except Exception as e: raise HTTPException(500, f"ComfyUI error: {str(e)}")
     
-    image_variants = message.image_variants or []
-    image_variants.append(new_image_path)
+    # ВАЖНО: создаём новый список. JSON-колонки SQLAlchemy не отслеживают
+    # in-place мутации, из-за чего новый вариант терялся при commit
+    image_variants = [*(message.image_variants or []), new_image_path]
     
     # Обновляем debug_info для этого нового варианта
     if not message.debug_info: message.debug_info = {}
@@ -299,3 +328,132 @@ async def select_version(req: dict, db: Session = Depends(get_db)):
     message.selected_version_index = req["index"]
     db.commit()
     return {"status": "ok"}
+
+# ============ АВАТАРКИ МИРА (ЧАТА) ============
+
+@router.get("/dialogues/{dialogue_id}/avatars")
+async def list_dialogue_avatars(dialogue_id: str, db: Session = Depends(get_db)):
+    """Все аватарки, привязанные к конкретному миру (чату)."""
+    dialogue = db.query(Dialogue).filter(Dialogue.id == dialogue_id).first()
+    if not dialogue: raise HTTPException(404, "Dialogue not found")
+
+    avatars = (
+        db.query(CharacterAvatar)
+        .filter(CharacterAvatar.dialogue_id == dialogue_id)
+        .order_by(CharacterAvatar.created_at.desc())
+        .all()
+    )
+    card_names = {
+        c.id: c.name
+        for c in db.query(CharacterCard).filter(CharacterCard.id.in_({a.character_card_id for a in avatars})).all()
+    } if avatars else {}
+
+    return [{
+        "id": a.id,
+        "character_card_id": a.character_card_id,
+        "character_name": card_names.get(a.character_card_id),
+        "dialogue_id": a.dialogue_id,
+        "image_path": a.image_path,
+        "prompt": a.prompt,
+        "negative_prompt": a.negative_prompt,
+        "source": a.source,
+        "created_at": a.created_at.isoformat(),
+    } for a in avatars]
+
+@router.post("/dialogues/{dialogue_id}/avatar")
+async def upload_dialogue_avatar(
+    dialogue_id: str,
+    file: UploadFile = File(...),
+    character_card_id: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    """Загрузка пользовательской аватарки с привязкой к миру (чату) и карточке персонажа."""
+    dialogue = db.query(Dialogue).filter(Dialogue.id == dialogue_id).first()
+    if not dialogue: raise HTTPException(404, "Dialogue not found")
+
+    # Если карточка не передана — берём первую привязанную к миру
+    if not character_card_id:
+        link = db.query(DialogueCharacter).filter(DialogueCharacter.dialogue_id == dialogue_id).first()
+        character_card_id = link.character_card_id if link else None
+    if not character_card_id:
+        raise HTTPException(400, "К этому миру не привязана ни одна карточка персонажа")
+
+    card = db.query(CharacterCard).filter(CharacterCard.id == character_card_id).first()
+    if not card: raise HTTPException(404, "Character card not found")
+
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(400, "Пустой файл")
+
+    ext = (file.filename or "png").rsplit(".", 1)[-1].lower()
+    if ext not in {"png", "jpg", "jpeg", "webp"}:
+        raise HTTPException(400, "Поддерживаются только png, jpg, jpeg и webp")
+
+    file_hash = hashlib.md5(contents).hexdigest()
+    filename = f"{file_hash}.{ext}"
+    target_dir = os.path.join(config.AVATARS_PATH, "uploads", character_card_id)
+    os.makedirs(target_dir, exist_ok=True)
+    filepath = os.path.join(target_dir, filename)
+
+    if not os.path.exists(filepath):
+        with open(filepath, "wb") as buffer:
+            buffer.write(contents)
+
+    image_path = f"/avatars/uploads/{character_card_id}/{filename}"
+    avatar = CharacterAvatar(
+        id=str(uuid.uuid4()),
+        character_card_id=character_card_id,
+        dialogue_id=dialogue_id,
+        image_path=image_path,
+        prompt="",
+        negative_prompt="",
+        source="upload",
+    )
+    db.add(avatar)
+    db.commit()
+
+    return {
+        "id": avatar.id,
+        "character_card_id": character_card_id,
+        "dialogue_id": dialogue_id,
+        "image_path": image_path,
+        "source": "upload",
+        "created_at": avatar.created_at.isoformat(),
+    }
+
+@router.post("/dialogues/{dialogue_id}/user-avatar")
+async def upload_user_avatar(
+    dialogue_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Индивидуальный аватар пользователя для конкретного мира (чата)."""
+    dialogue = db.query(Dialogue).filter(Dialogue.id == dialogue_id).first()
+    if not dialogue: raise HTTPException(404, "Dialogue not found")
+    settings = dialogue.settings
+    if not settings: raise HTTPException(404, "Dialogue settings not found")
+
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(400, "Пустой файл")
+
+    ext = (file.filename or "png").rsplit(".", 1)[-1].lower()
+    if ext not in {"png", "jpg", "jpeg", "webp"}:
+        raise HTTPException(400, "Поддерживаются только png, jpg, jpeg и webp")
+
+    file_hash = hashlib.md5(contents).hexdigest()
+    filename = f"{file_hash}.{ext}"
+    target_dir = os.path.join(config.AVATARS_PATH, "users", dialogue_id)
+    os.makedirs(target_dir, exist_ok=True)
+    filepath = os.path.join(target_dir, filename)
+
+    if not os.path.exists(filepath):
+        with open(filepath, "wb") as buffer:
+            buffer.write(contents)
+
+    image_path = f"/avatars/users/{dialogue_id}/{filename}"
+    settings.user_avatar_path = image_path
+    db.commit()
+
+    return {"dialogue_id": dialogue_id, "image_path": image_path}
+

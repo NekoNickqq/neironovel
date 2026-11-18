@@ -9,7 +9,7 @@ import re
 import hashlib
 from image_utils import cleanup_orphan_images
 
-from database import get_db, WorldCard, CharacterCard
+from database import get_db, WorldCard, CharacterCard, Dialogue, DialogueCharacter, CharacterAvatar, GeneratedImagePrompt
 from config import config
 from ollama_client import ollama_client
 from comfyui_client import comfyui_client
@@ -40,6 +40,8 @@ class WorldCardSchema(BaseModel):
     negative_prompt: str
     image_variants: list = []
     selected_image_index: int = 0
+    image_prompt: str = ""
+    image_negative_prompt: str = ""
 
 class CharacterCardSchema(BaseModel):
     id: Optional[str] = None
@@ -51,17 +53,47 @@ class CharacterCardSchema(BaseModel):
     negative_personality: str
     image_variants: list = []
     selected_image_index: int = 0
+    image_prompt: str = ""
+    image_negative_prompt: str = ""
+
+
+def _selected_variant(variants: list, index: int) -> Optional[str]:
+    """Возвращает выбранный путь картинки с защитой от некорректного индекса."""
+    paths = list(variants or [])
+    if not paths:
+        return None
+    if isinstance(index, int) and 0 <= index < len(paths):
+        return paths[index]
+    return paths[-1]
+
+
+def _apply_prompt_from_image(db: Session, card, image_variants: list, selected_index: int) -> None:
+    """Дублирует промпт сгенерированной картинки в скрытое поле карточки.
+
+    Промпт берётся из хранилища image_prompts (извлечён из PNG-метаданных ComfyUI).
+    """
+    path = _selected_variant(image_variants, selected_index)
+    if not path:
+        return
+    row = db.query(GeneratedImagePrompt).filter(GeneratedImagePrompt.image_path == path).first()
+    if not row:
+        return
+    card.image_prompt = row.prompt or ""
+    card.image_negative_prompt = row.negative_prompt or ""
 
 # ============ Эндпоинты ============
 
 @router.get("/worlds")
 async def list_worlds(db: Session = Depends(get_db)):
     worlds = db.query(WorldCard).all()
-    return [{"id": w.id, "name": w.name, "history": w.history, "features": w.features, "appearance": w.appearance, "negative_prompt": w.negative_prompt, "image_variants": w.image_variants, "selected_image_index": w.selected_image_index} for w in worlds]
+    return [{"id": w.id, "name": w.name, "history": w.history, "features": w.features, "appearance": w.appearance, "negative_prompt": w.negative_prompt, "image_variants": w.image_variants, "selected_image_index": w.selected_image_index, "image_prompt": w.image_prompt, "image_negative_prompt": w.image_negative_prompt} for w in worlds]
 
 @router.post("/worlds")
 async def create_world(req: WorldCardSchema, db: Session = Depends(get_db)):
     w = WorldCard(id=str(uuid.uuid4()), **req.dict(exclude={"id"}))
+    # Скрытый промпт выбранной картинки (из PNG-метаданных ComfyUI), если он ещё не задан явно
+    if not w.image_prompt:
+        _apply_prompt_from_image(db, w, req.image_variants, req.selected_image_index)
     db.add(w)
     db.commit()
     return {"id": w.id}
@@ -81,11 +113,14 @@ async def update_world(card_id: str, req: WorldCardSchema, db: Session = Depends
 @router.get("/characters")
 async def list_chars(db: Session = Depends(get_db)):
     chars = db.query(CharacterCard).all()
-    return [{"id": c.id, "name": c.name, "appearance": c.appearance, "personality": c.personality, "features": c.features, "negative_appearance": c.negative_appearance, "negative_personality": c.negative_personality, "image_variants": c.image_variants, "selected_image_index": c.selected_image_index} for c in chars]
+    return [{"id": c.id, "name": c.name, "appearance": c.appearance, "personality": c.personality, "features": c.features, "negative_appearance": c.negative_appearance, "negative_personality": c.negative_personality, "image_variants": c.image_variants, "selected_image_index": c.selected_image_index, "image_prompt": c.image_prompt, "image_negative_prompt": c.image_negative_prompt} for c in chars]
 
 @router.post("/characters")
 async def create_char(req: CharacterCardSchema, db: Session = Depends(get_db)):
     c = CharacterCard(id=str(uuid.uuid4()), **req.dict(exclude={"id"}))
+    # Скрытый промпт выбранной картинки (из PNG-метаданных ComfyUI), если он ещё не задан явно
+    if not c.image_prompt:
+        _apply_prompt_from_image(db, c, req.image_variants, req.selected_image_index)
     db.add(c)
     db.commit()
     return {"id": c.id}
@@ -110,8 +145,10 @@ async def update_card_images(card_type: str, card_id: str, req: UpdateImagesRequ
     if not card: raise HTTPException(404, "Card not found")
     card.image_variants = req.image_variants
     card.selected_image_index = req.selected_image_index
+    # Промпт выбранной картинки дублируем в скрытое поле карточки
+    _apply_prompt_from_image(db, card, req.image_variants, req.selected_image_index)
     db.commit()
-    return {"status": "updated"}
+    return {"status": "updated", "image_prompt": card.image_prompt, "image_negative_prompt": card.image_negative_prompt}
 
 @router.delete("/{card_type}/{card_id}")
 async def delete_card(card_type: str, card_id: str, db: Session = Depends(get_db)):
@@ -180,7 +217,7 @@ async def upload_image(card_type: str = Query(...), file: UploadFile = File(...)
     return {"image_path": f"/gallery/{subpath}/{filename}"}
 
 @router.post("/generate_image")
-async def generate_card_image(req: GenerateCardImageRequest):
+async def generate_card_image(req: GenerateCardImageRequest, db: Session = Depends(get_db)):
     try:
         clean_negative_words = ["ugly", "blurry", "low quality", "deformed", "bad anatomy", "worst quality", "sketch"]
         tags = [t.strip() for t in req.prompt.split(',') if t.strip()]
@@ -191,6 +228,86 @@ async def generate_card_image(req: GenerateCardImageRequest):
         else:
             res = await comfyui_client.generate_image(final_prompt, req.negative_prompt, width=720, height=1680, subfolder="cards/characters")
             
-        return {"image_path": res["image_path"]}
+        # Промпт из PNG-метаданных ComfyUI (фолбэк — отправленный) сохраняем,
+        # чтобы позже продублировать его в скрытое поле карточки
+        used_prompt = res.get("prompt") or final_prompt
+        used_negative = res.get("negative_prompt") or req.negative_prompt
+        db.merge(GeneratedImagePrompt(
+            image_path=res["image_path"],
+            prompt=used_prompt,
+            negative_prompt=used_negative,
+            source=res.get("prompt_source", "request"),
+        ))
+        db.commit()
+
+        return {
+            "image_path": res["image_path"],
+            "prompt": used_prompt,
+            "negative_prompt": used_negative,
+            "prompt_source": res.get("prompt_source", "request"),
+        }
     except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+# ============ МИРЫ И АВАТАРКИ КАРТОЧКИ ПЕРСОНАЖА ============
+
+@router.get("/characters/{card_id}/worlds")
+async def list_character_worlds(card_id: str, db: Session = Depends(get_db)):
+    """Все миры (чаты), в которых используется карточка персонажа."""
+    card = db.query(CharacterCard).filter(CharacterCard.id == card_id).first()
+    if not card: raise HTTPException(404, "Character not found")
+
+    dialogues = (
+        db.query(Dialogue)
+        .join(DialogueCharacter, DialogueCharacter.dialogue_id == Dialogue.id)
+        .filter(DialogueCharacter.character_card_id == card_id)
+        .order_by(Dialogue.created_at.desc())
+        .all()
+    )
+
+    result = []
+    for d in dialogues:
+        avatar_count = db.query(CharacterAvatar).filter(
+            CharacterAvatar.character_card_id == card_id,
+            CharacterAvatar.dialogue_id == d.id,
+        ).count()
+        result.append({
+            "id": d.id,
+            "title": d.title,
+            "description": d.settings.world_data.get("name", "") if d.settings and d.settings.world_data else "",
+            "message_count": len(d.messages),
+            "avatar_count": avatar_count,
+            "created_at": d.created_at.isoformat(),
+        })
+    return result
+
+@router.get("/characters/{card_id}/avatars")
+async def list_character_avatars(card_id: str, db: Session = Depends(get_db)):
+    """Все сгенерированные и загруженные аватарки карточки персонажа."""
+    card = db.query(CharacterCard).filter(CharacterCard.id == card_id).first()
+    if not card: raise HTTPException(404, "Character not found")
+
+    avatars = (
+        db.query(CharacterAvatar)
+        .filter(CharacterAvatar.character_card_id == card_id)
+        .order_by(CharacterAvatar.created_at.desc())
+        .all()
+    )
+
+    dialogue_titles = {
+        d.id: d.title
+        for d in db.query(Dialogue).filter(Dialogue.id.in_({a.dialogue_id for a in avatars if a.dialogue_id})).all()
+    } if avatars else {}
+
+    return [{
+        "id": a.id,
+        "character_card_id": a.character_card_id,
+        "dialogue_id": a.dialogue_id,
+        "dialogue_title": dialogue_titles.get(a.dialogue_id),
+        "image_path": a.image_path,
+        "prompt": a.prompt,
+        "negative_prompt": a.negative_prompt,
+        "source": a.source,
+        "created_at": a.created_at.isoformat(),
+    } for a in avatars]

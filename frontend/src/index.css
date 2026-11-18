@@ -162,3 +162,11 @@ textarea.scrollbar-thin:focus {
 .animate-pop-out {
   animation: popOut 0.2s ease-in forwards;
 }
+
+@keyframes checkmarkDraw {
+  0% { stroke-dashoffset: 40; }
+  100% { stroke-dashoffset: 0; }
+}
+.animate-checkmark {
+  animation: checkmarkDraw 0.6s ease-out forwards;
+}

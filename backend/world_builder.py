@@ -3,6 +3,7 @@ import re
 from database import SessionLocal, DialogueSettings
 from ollama_client import ollama_client
 from utils import extract_json_from_text
+from avatar_builder import generate_avatars_for_dialogue
 
 async def generate_world_state(dialogue_id: str, world_data: dict, character_cards: list):
     print(f"🌍 [World Builder] Начинаю генерацию мира для диалога {dialogue_id}...")
@@ -83,6 +84,14 @@ async def generate_world_state(dialogue_id: str, world_data: dict, character_car
                 print("✅ [World Builder] Состояние мира сохранено!")
         finally:
             db.close()
+
+        # === ЭТАП 4: Автогенерация аватарок персонажей ===
+        # Мир построен — формируем промпты из карточек и генерируем аватарки
+        # в backend/gallery/avatars/characters.
+        try:
+            await generate_avatars_for_dialogue(dialogue_id, character_cards, world_data)
+        except Exception as e:
+            print(f"⚠️ [World Builder] Автогенерация аватарок не удалась: {e}")
             
     except Exception as e:
         print(f"❌ [World Builder] Ошибка: {e}")

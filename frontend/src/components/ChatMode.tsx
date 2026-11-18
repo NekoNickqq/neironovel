@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect, KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, ChangeEvent, KeyboardEvent, ReactNode } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../store';
-import { ArrowLeft, ImagePlus, RefreshCw, ChevronLeft, ChevronRight, BookOpen, Server, Send, Terminal, Square, Settings, Loader2 } from 'lucide-react';
-import { Message } from '../types';
+import { ArrowLeft, ImagePlus, RefreshCw, ChevronLeft, ChevronRight, BookOpen, Server, Send, Terminal, Square, Settings, Loader2, User } from 'lucide-react';
+import { Message, TextBlock } from '../types';
 import { SceneImage } from './SceneImage';
 import { OllamaSettingsModal } from './OllamaSettingsModal';
 import { MessageDebugModal } from './MessageDebugModal';
@@ -15,7 +15,7 @@ export function ChatMode() {
   
   const { 
     state, dispatch, currentDialogue, openDialogue, sendMessage, stopGeneration, 
-    regenerateText, regenerateImage, selectImage, selectTextVersion, 
+    regenerateText, regenerateImage, selectImage, selectTextVersion, uploadUserAvatar,
     setSelectedOllamaModel, refreshOllamaModels 
   } = useApp();
   
@@ -30,36 +30,151 @@ export function ChatMode() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Аватар пользователя: клик по круглой аватарке открывает стандартный выбор файла
+  const userAvatarInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingUserAvatar, setIsUploadingUserAvatar] = useState(false);
+
+  const handleUserAvatarChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setIsUploadingUserAvatar(true);
+    try { await uploadUserAvatar(file); } finally { setIsUploadingUserAvatar(false); }
+  };
+
+  // Круглые аватарки блоков: пользователь, нарратор (обложка мира) и персонажи этого мира
+  const dialogueAvatars = currentDialogue?.avatars ?? [];
+  const characterCards = currentDialogue?.settings.character_cards ?? [];
+  const worldData = currentDialogue?.settings.world_data;
+  const narratorAvatar = worldData?.image_variants?.[worldData.selected_image_index]
+    ?? worldData?.image_variants?.[0]
+    ?? null;
+  const avatarForCard = (cardId?: string | null) =>
+    cardId ? (dialogueAvatars.find(a => a.character_card_id === cardId)?.image_path ?? null) : null;
+  const userAvatarPath = currentDialogue?.settings.user_avatar_path ?? null;
+  const messageAvatars = {
+    user: userAvatarPath,
+    narrator: narratorAvatar,
+    bySpeaker: {
+      user: userAvatarPath,
+      hero: avatarForCard(characterCards[0]?.id),
+      sidekick: avatarForCard((characterCards[1] ?? characterCards[0])?.id),
+    } as Record<string, string | null>,
+    nameBySpeaker: {
+      hero: characterCards[0]?.name ?? 'Персонаж',
+      sidekick: (characterCards[1] ?? characterCards[0])?.name ?? 'Персонаж',
+    } as Record<string, string>,
+  };
+
   // Проверяем, есть ли стартовая локация (признак, что мир сгенерирован)
   const isWorldReady = !!currentDialogue?.settings?.world_state?.start_location;
 
-  // Умный поллинг без спама запросов
+  // Состояние этапов генерации мира (для цветной визуализации)
+  const [worldStages, setWorldStages] = useState<{ step1: boolean; step2: boolean; step3: boolean }>({ step1: false, step2: false, step3: false });
+  // Анимация завершения генерации
+  const [showCompletion, setShowCompletion] = useState(false);
+  const [showCheckmark, setShowCheckmark] = useState(false);
+
+  // Рефы для надёжного опроса без замыканий и самоподдерживающегося цикла
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef(true);
+  const pollAttemptsRef = useRef(0);
+  const currentDialogueRef = useRef(currentDialogue);
+  const MAX_POLL_ATTEMPTS = 30; // ~90 секунд при интервале 3с
+
+  // Галочка готовности мира показывается СТРОГО один раз — только сразу после первичного создания мира.
+  // Флаг фиксируем на монтировании, чтобы последующие перезагрузки диалога (сообщения, перегенерации)
+  // и повторный вход в существующий чат её не запускали.
+  const justCreatedOnMountRef = useRef(state.freshDialogueId === id);
+  const completionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const completionHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Синхронизируем ref с актуальным currentDialogue при каждом рендере
+  currentDialogueRef.current = currentDialogue;
+
+  // Опрос готовности мира: тянет диалог пока world_state.start_location не появится.
+  // currentDialogue bewusst НЕ в зависимостях, иначе любой апдейт стора перезапускал бы эффект и спамил запросами.
   useEffect(() => {
-    let isMounted = true;
-    
-    const checkStatus = async () => {
-      if (!isMounted || isWorldReady || !id) return;
-      
+    isMountedRef.current = true;
+    pollAttemptsRef.current = 0;
+
+    const poll = async () => {
+      if (!isMountedRef.current || !id) return;
+
+      // Читаем актуальный currentDialogue из ref (без зависимости в useEffect)
+      const ready = !!currentDialogueRef.current?.settings?.world_state?.start_location;
+      if (ready) {
+        pollTimerRef.current = null;
+        return;
+      }
+
+      pollAttemptsRef.current += 1;
+      if (pollAttemptsRef.current > MAX_POLL_ATTEMPTS) {
+        console.error("Мировая генерация не завершилась за отведённое время");
+        pollTimerRef.current = null;
+        return;
+      }
+
       try {
         await openDialogue(id);
       } catch (e) {
-        console.error("Ошибка обновления статуса", e);
+        console.error("Ошибка опроса диалога", e);
       }
-      
-      // Если мир еще не готов, ждем 3 секунды и проверяем снова
-      if (isMounted && !isWorldReady) {
-        setTimeout(checkStatus, 3000);
+
+      // Если при размонтировании или смене id во время запроса — не продолжаем
+      if (!isMountedRef.current || !id) return;
+
+      const readyAgain = !!currentDialogueRef.current?.settings?.world_state?.start_location;
+      if (!readyAgain && isMountedRef.current) {
+        pollTimerRef.current = setTimeout(poll, 3000);
       }
     };
 
-    if (!isWorldReady && currentDialogue) {
-      const timer = setTimeout(checkStatus, 3000);
-      return () => {
-        isMounted = false;
-        clearTimeout(timer);
-      };
+    poll();
+
+    return () => {
+      isMountedRef.current = false;
+      if (pollTimerRef.current) {
+        clearTimeout(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, [id, openDialogue]);
+
+  // Анимация завершения генерации мира: определяет выполненные этапы и запускает показ галочки.
+  // Показываем строго один раз — только сразу после первичного создания мира.
+  useEffect(() => {
+    if (!isWorldReady || !currentDialogue?.settings?.world_state) return;
+    // Диалог открыт повторно (или это обычная генерация) — галочку не показываем
+    if (!justCreatedOnMountRef.current) return;
+
+    justCreatedOnMountRef.current = false;
+    dispatch({ type: 'SET_FRESH_DIALOGUE', payload: null });
+
+    const ws = currentDialogue.settings.world_state;
+    setWorldStages({
+      step1: !!ws.character_backstory,
+      step2: Array.isArray(ws.base_locations) && ws.base_locations.length > 0,
+      step3: Array.isArray(ws.outfit_sets) && ws.outfit_sets.length > 0,
+    });
+
+    setShowCompletion(true);
+    setShowCheckmark(true);
+
+    completionTimerRef.current = setTimeout(() => {
+      setShowCheckmark(false);
+      completionHideTimerRef.current = setTimeout(() => setShowCompletion(false), 500);
+    }, 1500);
+  }, [isWorldReady, currentDialogue, dispatch]);
+
+  // Если пользователь ушёл из чата раньше, чем мир стал готов, маркер сбрасываем:
+  // повторный вход в уже существующий чат галочку не показывает
+  useEffect(() => () => {
+    if (justCreatedOnMountRef.current) {
+      justCreatedOnMountRef.current = false;
+      dispatch({ type: 'SET_FRESH_DIALOGUE', payload: null });
     }
-  }, [id, isWorldReady]); // Зависит только от id и статуса готовности
+  }, [dispatch]);
 
   useEffect(() => { 
     if (isWorldReady) {
@@ -170,7 +285,7 @@ export function ChatMode() {
       {showEditSettings && <EditSettingsModal onClose={() => setShowEditSettings(false)} />}
 
       {/* ОБЛАСТЬ СООБЩЕНИЙ */}
-      <div className="flex-1 overflow-y-auto pt-24 pb-24 px-6 scrollbar-thin" onScroll={handleScroll}>
+      <div className="flex-1 overflow-y-auto pt-24 pb-[calc(15rem+env(safe-area-inset-bottom))] px-6 scrollbar-thin" onScroll={handleScroll}>
         <div className="max-w-4xl mx-auto">
           
           {/* Экран загрузки мира */}
@@ -179,10 +294,36 @@ export function ChatMode() {
               <Loader2 size={48} className="animate-spin text-purple-500 mb-6" />
               <h2 className="text-2xl font-bold text-white mb-2">Генерация мира...</h2>
               <p className="text-gray-400 max-w-md">Нейросеть создает предысторию, базовые локации и сеты одежды. Пожалуйста, подождите.</p>
-              <div className="mt-6 flex flex-wrap justify-center gap-2 text-sm text-gray-500">
-                <span className="px-3 py-1 bg-gray-800 rounded-full border border-gray-700">Шаг 1: Предыстория</span>
-                <span className="px-3 py-1 bg-gray-800 rounded-full border border-gray-700">Шаг 2: Локации</span>
-                <span className="px-3 py-1 bg-gray-800 rounded-full border border-gray-700">Шаг 3: Одежда</span>
+              <div className="mt-6 flex flex-wrap justify-center gap-2 text-sm">
+                <span className={`px-3 py-1 rounded-full border ${worldStages.step1 ? 'bg-green-900/50 text-green-400 border-green-500' : 'bg-gray-800 text-gray-500 border-gray-700'}`}>Шаг 1: Предыстория</span>
+                <span className={`px-3 py-1 rounded-full border ${worldStages.step2 ? 'bg-green-900/50 text-green-400 border-green-500' : 'bg-gray-800 text-gray-500 border-gray-700'}`}>Шаг 2: Локации</span>
+                <span className={`px-3 py-1 rounded-full border ${worldStages.step3 ? 'bg-green-900/50 text-green-400 border-green-500' : 'bg-gray-800 text-gray-500 border-gray-700'}`}>Шаг 3: Одежда</span>
+              </div>
+            </div>
+          )}
+
+          {/* Индикатор завершения генерации мира — обычный слой страницы, без перекрывающего оверлея */}
+          {showCompletion && (
+            <div
+              className={`mb-6 flex justify-center transition-all duration-500 ${
+                showCheckmark ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1'
+              }`}
+            >
+              <div className="flex items-center justify-center rounded-2xl border border-green-500/30 bg-green-500/10 px-4 py-3 shadow-lg shadow-green-900/20">
+                <svg className="h-9 w-9 text-green-500" viewBox="0 0 52 52" role="img" aria-label="Мир готов">
+                  <circle cx="26" cy="26" r="26" fill="currentColor" className="text-green-600/20" />
+                  <path
+                    className="animate-checkmark"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M14 27 L21 34 L36 18"
+                    strokeDasharray="40"
+                    strokeDashoffset="40"
+                  />
+                </svg>
               </div>
             </div>
           )}
@@ -195,12 +336,24 @@ export function ChatMode() {
             </div>
           )}
           
+          {/* Скрытый input: выбор файла аватара пользователя */}
+          <input
+            ref={userAvatarInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleUserAvatarChange}
+            className="hidden"
+          />
+
           {/* Сообщения */}
           {isWorldReady && currentDialogue.messages.map((msg, idx) => (
             <ChatMessageItem 
               key={msg.id} 
               message={msg} 
               isLast={idx === currentDialogue.messages.length - 1} 
+              avatars={messageAvatars}
+              isUploadingUserAvatar={isUploadingUserAvatar}
+              onUserAvatarClick={() => userAvatarInputRef.current?.click()}
               onRegenerateText={regenerateText} 
               onRegenerateImage={regenerateImage} 
               onSelectImage={(m, i) => void selectImage(m, i)} 
@@ -262,65 +415,185 @@ export function ChatMode() {
   );
 }
 
-function ChatMessageItem({ message, isLast, onRegenerateText, onRegenerateImage, onSelectImage, onSelectVersion }: { message: Message; isLast: boolean; onRegenerateText: (id: string) => void; onRegenerateImage: (id: string, mode: 'same' | 'new') => void; onSelectImage: (messageId: string, index: number) => void; onSelectVersion: (messageId: string, index: number) => void; }) {
+type MessageAvatars = {
+  user: string | null;
+  narrator: string | null;
+  bySpeaker: Record<string, string | null>;
+  nameBySpeaker: Record<string, string>;
+};
+
+function ChatMessageItem({ message, isLast, avatars, isUploadingUserAvatar, onUserAvatarClick, onRegenerateText, onRegenerateImage, onSelectImage, onSelectVersion }: { message: Message; isLast: boolean; avatars: MessageAvatars; isUploadingUserAvatar?: boolean; onUserAvatarClick?: () => void; onRegenerateText: (id: string) => void; onRegenerateImage: (id: string, mode: 'same' | 'new') => void; onSelectImage: (messageId: string, index: number) => void; onSelectVersion: (messageId: string, index: number) => void; }) {
   const isUser = message.role === 'user';
   const [showDebug, setShowDebug] = useState(false);
   const currentBlocks = message.text_versions.length > 0 && message.selected_version_index > 0 ? message.text_versions[message.selected_version_index - 1] : message.blocks;
-  const currentImage = message.image_variants.length > 0 ? message.image_variants[message.selected_image_index] : message.image_path;
+  const imageVariants = message.image_variants ?? [];
+  // Защита от «сбитого» selected_image_index (старые записи в БД): показываем последний доступный вариант
+  const currentImage = imageVariants[message.selected_image_index]
+    ?? imageVariants[imageVariants.length - 1]
+    ?? message.image_path
+    ?? null;
+
+  // Ответ ИИ разбиваем на три независимых блока: нарратор → персонаж → изображение
+  const hasText = (b: TextBlock) => typeof b.text === 'string' && b.text.trim().length > 0;
+  const narratorBlocks = currentBlocks.filter(b => b.speaker === 'narrator' && hasText(b));
+  const characterBlocks = currentBlocks.filter(b => b.speaker !== 'narrator' && hasText(b));
+
+  // Аватарка персонажа — из карточки, соответствующей первому говорящему в блоке
+  const firstCharacterSpeaker = characterBlocks[0]?.speaker;
+  const characterAvatar = firstCharacterSpeaker ? (avatars.bySpeaker[firstCharacterSpeaker] ?? null) : null;
+
+  const assistantCardClass = 'rounded-2xl p-5 bg-surface/60 border border-gray-800/50 backdrop-blur-sm';
 
   return (
-    <div className={`message-enter flex ${isUser ? 'justify-end' : 'justify-start'} mb-6`}>
-      <div className={`max-w-[85%]`}>
-        <div className={`rounded-2xl p-5 ${isUser ? 'bg-gradient-to-br from-purple-900/40 to-purple-800/20 border border-purple-700/30' : 'bg-surface/60 border border-gray-800/50'}`}>
-          <div>
-            {currentBlocks.map((block, idx) => (
-              <TextBlockRenderer key={idx} block={block} isFirst={idx === 0} variant="chat" />
-            ))}
-          </div>
-          {currentImage && (
-            <div className="mt-4">
-              <SceneImage src={currentImage} alt="Scene" className="rounded-xl w-full max-h-96 object-cover border border-gray-700/50" />
-              {message.image_variants.length > 1 && (
-                <div className="flex gap-2 mt-2 overflow-x-auto pb-2">
-                  {message.image_variants.map((img, idx) => (
-                    <button key={idx} onClick={() => onSelectImage(message.id, idx)} className={`flex-shrink-0 w-16 h-10 rounded-lg overflow-hidden border-2 transition-all ${idx === message.selected_image_index ? 'border-purple-500 scale-110' : 'border-transparent opacity-60 hover:opacity-100'}`}>
-                      <SceneImage src={img} alt={`Variant ${idx + 1}`} className="w-full h-full object-cover" />
-                    </button>
+    <div className={`message-enter flex mb-6 ${isUser ? 'justify-end' : 'justify-start'}`}>
+      <div className="flex max-w-[85%] min-w-0 items-start gap-3">
+        {isUser ? (
+          <>
+            <div className="min-w-0 flex flex-col items-end gap-3">
+              <div className="rounded-2xl p-5 bg-gradient-to-br from-purple-900/40 to-purple-800/20 border border-purple-700/30">
+                <div>
+                  {currentBlocks.map((block, idx) => (
+                    <TextBlockRenderer key={idx} block={block} isFirst={idx === 0} variant="chat" speakerLabel={null} />
                   ))}
                 </div>
-              )}
+              </div>
             </div>
-          )}
-        </div>
-        {!isUser && (
-          <div className="flex items-center gap-2 mt-2 ml-2">
-            <button onClick={() => onRegenerateText(message.id)} className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-400 hover:text-purple-300 hover:bg-purple-900/20 rounded-lg transition-all">
-              <RefreshCw size={12} /> Текст
-            </button>
-            {message.has_image && (
-              <div className="group/regen inline-flex items-center overflow-hidden rounded-lg border border-transparent transition-colors duration-200 group-hover/regen:border-purple-700/40 group-hover/regen:bg-purple-950/30">
-                <button onClick={() => onRegenerateImage(message.id, 'same')} className="flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs text-gray-400 transition-all duration-200 hover:text-white hover:bg-purple-800/40 hover:shadow-[0_0_12px_rgba(255,255,255,0.45),inset_0_0_8px_rgba(255,255,255,0.15)]" title="Ещё вариант (тот же промпт, новый seed) · ~15-30 сек">
-                  <ImagePlus size={12} /> <span>Картинка</span>
-                </button>
-                <button onClick={() => onRegenerateImage(message.id, 'new')} className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-xs text-gray-400 max-w-0 px-0 py-1.5 opacity-0 transition-all duration-300 ease-out group-hover/regen:max-w-[120px] group-hover/regen:px-3 group-hover/regen:opacity-100 hover:text-white hover:bg-purple-800/40 hover:shadow-[0_0_12px_rgba(255,255,255,0.45),inset_0_0_8px_rgba(255,255,255,0.15)]" title="Новый промпт через LLM · ~30-60 сек">
-                  <RefreshCw size={12} /> <span>Новый</span>
-                </button>
+            {/* Аватар пользователя — СПРАВА от блока сообщения */}
+            <ChatAvatar
+              src={avatars.user}
+              alt="Аватар пользователя"
+              fallback={<User size={18} className="text-gray-400" />}
+              onClick={onUserAvatarClick}
+              title={isUploadingUserAvatar ? 'Загрузка аватара…' : 'Сменить аватар'}
+              loading={isUploadingUserAvatar}
+            />
+          </>
+        ) : (
+          <div className="min-w-0 flex flex-col gap-3">
+            {/* Блок 1. Текст нарратора/диктора — аватарка СЛЕВА */}
+            {narratorBlocks.length > 0 && (
+              <div className="flex items-start gap-3">
+                <ChatAvatar
+                  src={avatars.narrator}
+                  alt="Нарратор"
+                  fallback={<BookOpen size={18} className="text-purple-300" />}
+                  title="Нарратор"
+                />
+                <div className={`${assistantCardClass} min-w-0 flex-1`}>
+                  {narratorBlocks.map((block, idx) => (
+                    <TextBlockRenderer key={idx} block={block} isFirst={idx === 0} variant="chat" />
+                  ))}
+                </div>
               </div>
             )}
-            <button onClick={() => setShowDebug(true)} className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-500 hover:text-emerald-300 hover:bg-emerald-900/20 rounded-lg transition-all ml-1" title="Посмотреть логи генерации">
-              <Terminal size={12} /> Логи
-            </button>
-            {message.text_versions.length > 0 && (
-              <div className="flex items-center gap-1 ml-2">
-                <button onClick={() => onSelectVersion(message.id, Math.max(0, message.selected_version_index - 1))} className="p-1 text-gray-400 hover:text-white" disabled={message.selected_version_index === 0}><ChevronLeft size={14} /></button>
-                <span className="text-xs text-gray-500">v{message.selected_version_index + 1}/{message.text_versions.length + 1}</span>
-                <button onClick={() => onSelectVersion(message.id, Math.min(message.text_versions.length, message.selected_version_index + 1))} className="p-1 text-gray-400 hover:text-white" disabled={message.selected_version_index >= message.text_versions.length}><ChevronRight size={14} /></button>
+
+            {/* Блок 2. Текст/реплика персонажа — аватарка СЛЕВА */}
+            {characterBlocks.length > 0 && (
+              <div className="flex items-start gap-3">
+                <ChatAvatar
+                  src={characterAvatar}
+                  alt={avatars.nameBySpeaker[firstCharacterSpeaker ?? ''] ?? 'Персонаж'}
+                  fallback={<User size={18} className="text-gray-400" />}
+                  title={avatars.nameBySpeaker[firstCharacterSpeaker ?? ''] ?? 'Персонаж'}
+                />
+                <div className={`${assistantCardClass} min-w-0 flex-1`}>
+                  {characterBlocks.map((block, idx) => (
+                    <TextBlockRenderer
+                      key={idx}
+                      block={block}
+                      isFirst={idx === 0}
+                      variant="chat"
+                      speakerLabel={avatars.nameBySpeaker[block.speaker] ?? 'Персонаж'}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Блок 3. Сгенерированное изображение */}
+            {currentImage && (
+              <div className={`${assistantCardClass} p-3`}>
+                <SceneImage src={currentImage} alt="Scene" className="rounded-xl w-full max-h-96 object-cover border border-gray-700/50" />
+                {imageVariants.length > 1 && (
+                  <div className="flex gap-2 mt-2 overflow-x-auto pb-2">
+                    {imageVariants.map((img, idx) => (
+                      <button key={idx} onClick={() => onSelectImage(message.id, idx)} className={`flex-shrink-0 w-16 h-10 rounded-lg overflow-hidden border-2 transition-all ${idx === message.selected_image_index ? 'border-purple-500 scale-110' : 'border-transparent opacity-60 hover:opacity-100'}`}>
+                        <SceneImage src={img} alt={`Variant ${idx + 1}`} className="w-full h-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {!isUser && (
+              <div className="flex items-center gap-2 mt-2 ml-[52px]">
+                <button onClick={() => onRegenerateText(message.id)} className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-400 hover:text-purple-300 hover:bg-purple-900/20 rounded-lg transition-all">
+                  <RefreshCw size={12} /> Текст
+                </button>
+                {(message.has_image || !!currentImage) && (
+                  <div className="group/regen inline-flex items-center overflow-hidden rounded-lg border border-transparent transition-colors duration-200 group-hover/regen:border-purple-700/40 group-hover/regen:bg-purple-950/30">
+                    <button onClick={() => onRegenerateImage(message.id, 'same')} className="flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs text-gray-400 transition-all duration-200 hover:text-white hover:bg-purple-800/40 hover:shadow-[0_0_12px_rgba(255,255,255,0.45),inset_0_0_8px_rgba(255,255,255,0.15)]" title="Ещё вариант (тот же промпт, новый seed) · ~15-30 сек">
+                      <ImagePlus size={12} /> <span>Картинка</span>
+                    </button>
+                    <button onClick={() => onRegenerateImage(message.id, 'new')} className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-xs text-gray-400 max-w-0 px-0 py-1.5 opacity-0 transition-all duration-300 ease-out group-hover/regen:max-w-[120px] group-hover/regen:px-3 group-hover/regen:opacity-100 hover:text-white hover:bg-purple-800/40 hover:shadow-[0_0_12px_rgba(255,255,255,0.45),inset_0_0_8px_rgba(255,255,255,0.15)]" title="Новый промпт через LLM · ~30-60 сек">
+                      <RefreshCw size={12} /> <span>Новый</span>
+                    </button>
+                  </div>
+                )}
+                <button onClick={() => setShowDebug(true)} className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-500 hover:text-emerald-300 hover:bg-emerald-900/20 rounded-lg transition-all ml-1" title="Посмотреть логи генерации">
+                  <Terminal size={12} /> Логи
+                </button>
+                {message.text_versions.length > 0 && (
+                  <div className="flex items-center gap-1 ml-2">
+                    <button onClick={() => onSelectVersion(message.id, Math.max(0, message.selected_version_index - 1))} className="p-1 text-gray-400 hover:text-white" disabled={message.selected_version_index === 0}><ChevronLeft size={14} /></button>
+                    <span className="text-xs text-gray-500">v{message.selected_version_index + 1}/{message.text_versions.length + 1}</span>
+                    <button onClick={() => onSelectVersion(message.id, Math.min(message.text_versions.length, message.selected_version_index + 1))} className="p-1 text-gray-400 hover:text-white" disabled={message.selected_version_index >= message.text_versions.length}><ChevronRight size={14} /></button>
+                  </div>
+                )}
               </div>
             )}
           </div>
         )}
       </div>
       {showDebug && <MessageDebugModal message={message} onClose={() => setShowDebug(false)} />}
+    </div>
+  );
+}
+
+/** Круглая аватарка блока чата (пользователь / нарратор / персонаж) */
+function ChatAvatar({ src, alt, fallback, onClick, title, loading }: {
+  src?: string | null;
+  alt: string;
+  fallback: ReactNode;
+  onClick?: () => void;
+  title?: string;
+  loading?: boolean;
+}) {
+  const baseClass = 'mt-1 flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-gray-700/70 bg-gray-900/80';
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        title={title}
+        aria-label={title ?? alt}
+        className={`${baseClass} transition-all hover:border-purple-500/70 hover:bg-purple-900/30 hover:shadow-[0_0_12px_rgba(168,85,247,0.35)]`}
+      >
+        {loading
+          ? <Loader2 size={16} className="animate-spin text-purple-300" />
+          : src
+            ? <SceneImage src={src} alt={alt} className="h-full w-full object-cover" />
+            : fallback}
+      </button>
+    );
+  }
+
+  return (
+    <div title={title} className={baseClass}>
+      {src
+        ? <SceneImage src={src} alt={alt} className="h-full w-full object-cover" />
+        : fallback}
     </div>
   );
 }

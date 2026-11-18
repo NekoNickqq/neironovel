@@ -183,3 +183,22 @@ def build_avatar_prompt(character_description: str) -> str:
 
 def build_avatar_negative() -> str:
     return "ugly, blurry, low quality, deformed, bad anatomy, extra fingers, cropped, worst quality, low resolution, full body"
+
+def build_character_avatar_prompt(character_card: dict, world_data: dict = None) -> str:
+    """Формирует промпт аватарки на основе данных карточки персонажа (+ визуальный стиль мира)."""
+    card = character_card or {}
+    parts = [card.get("name", ""), card.get("appearance", ""), card.get("features", "")]
+    description = ", ".join(str(part).strip() for part in parts if part and str(part).strip())
+
+    if world_data:
+        style = str(world_data.get("appearance", "") or "").strip()
+        if style:
+            description = f"{description}, {style}" if description else style
+
+    return build_avatar_prompt(description)
+
+def build_character_avatar_negative(character_card: dict) -> str:
+    """Негативный промпт аватарки: личные негативы карточки + общие для портретов."""
+    card = character_card or {}
+    parts = [str(card.get("negative_appearance", "") or "").strip(), build_avatar_negative()]
+    return ", ".join(part for part in parts if part)

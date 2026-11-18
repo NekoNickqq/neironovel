@@ -1,10 +1,10 @@
 import os
 from sqlalchemy.orm import Session
-from database import Message, WorldCard, CharacterCard
+from database import Message, WorldCard, CharacterCard, CharacterAvatar, DialogueSettings
 from config import config
 
 def cleanup_orphan_images(db: Session):
-    """Удаляет картинки из папки gallery, на которые больше нет ссылок в БД"""
+    """Удаляет картинки из папок gallery и avatars, на которые больше нет ссылок в БД"""
     print("🧹 Запуск очистки мусора...")
     used_paths = set()
     
@@ -22,20 +22,31 @@ def cleanup_orphan_images(db: Session):
         if c.image_variants:
             for v in c.image_variants: used_paths.add(v)
 
-    # Проверяем все файлы в папке gallery
-    for root, _, files in os.walk(config.GALLERY_PATH):
-        for file in files:
-            full_path = os.path.join(root, file)
-            # Формируем путь вида /gallery/cards/worlds/123.png
-            rel_path = "/" + os.path.relpath(full_path, config.GALLERY_PATH).replace("\\", "/")
-            rel_path = f"/gallery{rel_path}"
-            
-            if rel_path not in used_paths:
-                try:
-                    os.remove(full_path)
-                    print(f"🗑️ Удален неиспользуемый файл: {rel_path}")
-                except Exception as e:
-                    print(f"Не удалось удалить {rel_path}: {e}")
+    # Аватарки (сгенерированные и загруженные) лежат в отдельной папке
+    for a in db.query(CharacterAvatar).all():
+        if a.image_path: used_paths.add(a.image_path)
+
+    # Индивидуальные аватары пользователей по мирам
+    for s in db.query(DialogueSettings).all():
+        if s.user_avatar_path: used_paths.add(s.user_avatar_path)
+
+    # Проверяем файлы в gallery (/gallery/...) и avatars (/avatars/...)
+    roots = ((config.GALLERY_PATH, "/gallery"), (config.AVATARS_PATH, "/avatars"))
+    for base_path, url_prefix in roots:
+        if not os.path.exists(base_path):
+            continue
+        for root, _, files in os.walk(base_path):
+            for file in files:
+                full_path = os.path.join(root, file)
+                rel_path = os.path.relpath(full_path, base_path).replace("\\", "/")
+                rel_path = f"{url_prefix}/{rel_path}"
+                
+                if rel_path not in used_paths:
+                    try:
+                        os.remove(full_path)
+                        print(f"🗑️ Удален неиспользуемый файл: {rel_path}")
+                    except Exception as e:
+                        print(f"Не удалось удалить {rel_path}: {e}")
                     
     # Удаляем пустые папки в Narrative (опционально)
     narrative_path = config.GALLERY_NARRATIVE

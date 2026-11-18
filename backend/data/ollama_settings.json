@@ -2,7 +2,7 @@
   "mode": "local",
   "ollama_url": "http://localhost:11434",
   "api_base_url": "https://ollama.com",
-  "api_key": "",
+  "api_key": "pza_6Z5RjYv-YdEtBnxeAzxyv8O0jJRmpju5",
   "model_local": "huihui_ai/gemma-4-abliterated:12b",
   "model_api": "qwen2.5:7b"
 }

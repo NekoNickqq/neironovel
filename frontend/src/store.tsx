@@ -9,6 +9,8 @@ interface AppState {
   draftDialogue: Dialogue | null;
   worlds: WorldCard[];
   characters: CharacterCard[];
+  // id диалога, созданного в текущей сессии (нужен, чтобы показать галочку готовности мира строго один раз)
+  freshDialogueId: string | null;
 }
 
 type Action =
@@ -21,12 +23,13 @@ type Action =
   | { type: 'SELECT_IMAGE'; payload: { messageId: string; index: number } }
   | { type: 'SELECT_TEXT_VERSION'; payload: { messageId: string; index: number } } | { type: 'DELETE_DIALOGUE'; payload: string }
   | { type: 'SET_DRAFT_DIALOGUE'; payload: Dialogue | null }
-  | { type: 'SET_WORLDS'; payload: WorldCard[] } | { type: 'SET_CHARACTERS'; payload: CharacterCard[] };
+  | { type: 'SET_WORLDS'; payload: WorldCard[] } | { type: 'SET_CHARACTERS'; payload: CharacterCard[] }
+  | { type: 'SET_FRESH_DIALOGUE'; payload: string | null };
 
 const initialState: AppState = {
   dialogues: [], currentDialogueId: null, isGenerating: false, isLoadingList: true,
   novelModeHidden: false, apiError: null, services: null, ollamaMode: 'local', ollamaModels: [], selectedOllamaModel: null,
-  draftDialogue: null, worlds: [], characters: [],
+  draftDialogue: null, worlds: [], characters: [], freshDialogueId: null,
 };
 
 function upsertDialogueList(dialogues: Dialogue[], dialogue: Dialogue): Dialogue[] {
@@ -67,6 +70,7 @@ function reducer(state: AppState, action: Action): AppState {
     case 'SET_DRAFT_DIALOGUE': return { ...state, draftDialogue: action.payload };
     case 'SET_WORLDS': return { ...state, worlds: action.payload };
     case 'SET_CHARACTERS': return { ...state, characters: action.payload };
+    case 'SET_FRESH_DIALOGUE': return { ...state, freshDialogueId: action.payload };
     default: return state;
   }
 }
@@ -93,6 +97,7 @@ interface AppContextType {
   regenerateImage: (messageId: string, mode?: 'same' | 'new', model?: string | null) => Promise<void>;
   selectImage: (messageId: string, index: number) => Promise<void>;
   selectTextVersion: (messageId: string, index: number) => Promise<void>;
+  uploadUserAvatar: (file: File) => Promise<void>;
   refreshOllamaModels: () => Promise<void>;
   setSelectedOllamaModel: (model: string | null) => void;
   setDraftForReuse: (dialogue: Dialogue) => void;
@@ -155,6 +160,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const dialogue = await api.createDialogue(payload);
       dispatch({ type: 'UPSERT_DIALOGUE', payload: dialogue });
       dispatch({ type: 'SELECT_DIALOGUE', payload: dialogue.id });
+      // Помечаем диалог как «только что созданный» — ChatMode покажет галочку готовности мира один раз
+      dispatch({ type: 'SET_FRESH_DIALOGUE', payload: dialogue.id });
       dispatch({ type: 'SET_API_ERROR', payload: null });
       dispatch({ type: 'SET_DRAFT_DIALOGUE', payload: null });
       return dialogue.id;
@@ -219,10 +226,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try { await api.selectVersion(messageId, index); } catch (err) { dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) }); await reloadCurrentDialogue(); }
   }, [reloadCurrentDialogue]);
 
+  // Загрузка индивидуального аватара пользователя для текущего мира (чата)
+  const uploadUserAvatar = useCallback(async (file: File) => {
+    if (!state.currentDialogueId) return;
+    try {
+      await api.uploadUserAvatar(state.currentDialogueId, file);
+      await reloadCurrentDialogue();
+      dispatch({ type: 'SET_API_ERROR', payload: null });
+    } catch (err) {
+      dispatch({ type: 'SET_API_ERROR', payload: formatApiError(err) });
+    }
+  }, [state.currentDialogueId, reloadCurrentDialogue]);
+
+
   return (
     <AppContext.Provider value={{
       state, dispatch, currentDialogue, refreshDialogueList, refreshCatalog, openDialogue, createDialogue, deleteDialogue,
       updateDialogueSettings, sendMessage, stopGeneration, regenerateText, regenerateImage, selectImage, selectTextVersion,
+      uploadUserAvatar,
       refreshOllamaModels, setSelectedOllamaModel, setDraftForReuse, clearDraft,
     }}>
       {children}

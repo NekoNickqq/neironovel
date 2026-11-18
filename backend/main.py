@@ -72,12 +72,13 @@ async def stream_logs():
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 # --- ПОДКЛЮЧАЕМ РОУТЕРЫ (СОХРАНЯЯ СТАРЫЕ ПУТИ) ---
+# ВАЖНО: диалоги подключаем ДО «корневого» catalog-роутера, иначе generic-роут
+# /{card_type}/{card_id} перехватывает DELETE /dialogues/{id}
+app.include_router(dialogues.router, tags=["Dialogues"])
+
 app.include_router(catalog.router, prefix="/catalog", tags=["Catalog"])
 # Дублируем /generate_negative для совместимости со старым фронтом (он в корне)
 app.include_router(catalog.router, prefix="", include_in_schema=False, tags=["Catalog"])
-
-# Диалоги и сообщения (пути уже прописаны внутри роутера, например /dialogues, /message)
-app.include_router(dialogues.router, tags=["Dialogues"]) 
 
 app.include_router(ollama.router, prefix="/ollama", tags=["Ollama"])
 

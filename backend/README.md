@@ -97,6 +97,21 @@ curl http://localhost:8000/health
 | POST | `/regenerate/text` | Перегенерировать текст |
 | POST | `/regenerate/image` | Перегенерировать картинку |
 
+### Карточки персонажей: миры и аватарки
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/catalog/characters/{card_id}/worlds` | Все миры (чаты), где используется карточка |
+| GET | `/catalog/characters/{card_id}/avatars` | Все аватарки карточки (сгенерированные и загруженные) |
+| GET | `/dialogues/{dialogue_id}/avatars` | Аватарки, привязанные к конкретному миру |
+| POST | `/dialogues/{dialogue_id}/avatar` | Загрузить свою аватарку (multipart: `file`, опц. `character_card_id`) |
+
+Аватарки автоматически генерируются в фоне на этапе построения мира (после этапов
+предыстории/локаций/одежды) и сохраняются в `backend/avatars/characters/<card_id>/`.
+Использованный промпт извлекается из PNG-метаданных ComfyUI
+(`Image.open(path).info["prompt"]`) и дублируется в скрытые поля
+`image_prompt` / `image_negative_prompt` карточки.
+
 ### Примеры
 
 **Создать диалог:**

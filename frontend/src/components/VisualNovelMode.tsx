@@ -31,7 +31,9 @@ export function VisualNovelMode() {
     for (let i = currentMessageIndex; i >= 0; i--) {
       if (messages[i]?.has_image) {
         const msg = messages[i];
-        return msg.image_variants.length > 0 ? msg.image_variants[msg.selected_image_index] : msg.image_path;
+        const variants = msg.image_variants ?? [];
+        // Защита от «сбитого» selected_image_index: берём последний доступный вариант
+        return variants[msg.selected_image_index] ?? variants[variants.length - 1] ?? msg.image_path;
       }
     }
     return null;

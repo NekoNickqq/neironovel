@@ -1,0 +1,46 @@
+# ============================================================
+# RP Novel Engine — быстрый справочник проекта
+# ============================================================
+
+## BACKEND (FastAPI, порт 8000)
+main.py — FastAPI приложение, CORS, lifespan (init_db + папки), статика /gallery, /avatars, роутеры, /health, /logs/stream
+database.py — SQLAlchemy + SQLite, модели таблиц, SessionLocal, init_db
+config.py — загрузка .env: OLLAMA_URL/MODEL, COMFYUI_URL, DATABASE_PATH, пути галереи/аватаров
+ollama_client.py — клиент Ollama API (генерация текста)
+comfyui_client.py — клиент ComfyUI API (генерация картинок, workflow.json)
+utils.py — парсинг JSON из Ollama, очистка ключей, промпты
+workflow.json — workflow ComfyUI для txt2img
+routers/catalog.py — карточки миров/персонажей, загрузка/генерация изображений
+routers/dialogues.py — диалоги, сообщения, регенерация текста/картинки, выбор варианта
+routers/ollama.py — настройки Ollama (модель, температура)
+/data/novel.db — SQLite БД (в .clineignore)
+
+## БД: таблицы и связи
+world_cards — id, name, history, features, appearance, negative_prompt, image_variants
+character_cards — id, name, appearance, personality, features, negative_appearance, negative_personality, image_variants
+dialogues — id, title, created_at (1:1 dialogue_settings, 1:N messages)
+dialogue_settings — dialogue_id FK, world_data JSON, character_cards JSON, font_config, ai_controls_user, story_mode, world_state
+messages — id, dialogue_id FK, role, content JSON, image_path, image_variants, text_versions, selected_image_index, selected_version_index, parent_id FK(self), created_at
+
+Связи: dialogues 1→N messages; messages.parent_id → messages.id (ветвление); world/character карты хранятся JSON внутри dialogue_settings
+
+## FRONTEND (React + Vite, порт 3000/5173)
+App.tsx — React Router: /, /create, /catalog, /catalog/create-world, /catalog/create-character, /catalog/:type/:id, /chat/:id, /novel/:id
+api.ts — API-клиент (fetch), методы каталога/диалогов/сообщений/Ollama
+store.tsx — AppContext: диалоги, миры, персонажи, текущий диалог, флаги генерации, Ollama-модели
+types.ts — TS-интерфейсы: TextBlock, WorldCard, CharacterCard, WorldState, DialogueSettings, Message, Dialogue, AppView
+components/
+DialogueList — список диалогов (главная)
+CreateDialogue — создание диалога
+ChatMode — рендер сообщений чата
+VisualNovelMode — режим визуальной новеллы
+Catalog — каталог карточек
+CreateWorldPage — создание мира
+CreateCharacterPage — создание персонажа
+CardViewPage — просмотр карточки мира/персонажа
+WorldCardView — отображение карточки мира
+CharacterCardView — отображение карточки персонажа
+SceneImage — рендер сцены/изображения
+TextBlockRenderer — рендер блоков текста сообщения
+ImageCreationPanel — панель генерации изображения
+OllamaSettingsModal — настройки Ollama

@@ -1,4 +1,4 @@
-import { Dialogue, DialogueSettings, Message, WorldCard, CharacterCard } from './types';
+import { Dialogue, DialogueSettings, Message, WorldCard, CharacterCard, WorldState, CharacterWorldLink, CharacterAvatarInfo, DialogueAvatar } from './types';
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api';
 
@@ -27,6 +27,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** POST multipart/form-data: request() всегда ставит Content-Type: application/json, поэтому отдельный helper */
+async function requestForm<T>(path: string, formData: FormData): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { method: 'POST', body: formData });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body.detail ?? JSON.stringify(body);
+    } catch { /* ignore */ }
+    throw new ApiError(String(detail), res.status);
+  }
+  return res.json() as Promise<T>;
+}
+
 const DEFAULT_FONTS = {
   narrator: 'Cinzel, Georgia, serif',
   user: 'Inter, sans-serif',
@@ -47,7 +61,10 @@ type ApiDialogueFull = {
     font_config?: any;
     ai_controls_user?: boolean;
     story_mode?: string; // <-- ДОБАВЛЕНО
+    world_state?: WorldState;
+    user_avatar_path?: string | null;
   }; 
+  avatars?: DialogueAvatar[];
   messages: Message[]; 
   created_at: string;
 };
@@ -88,7 +105,10 @@ export function normalizeDialogue(data: ApiDialogueFull): Dialogue {
       font_config: { ...DEFAULT_FONTS, ...(settings.font_config ?? {}) },
       ai_controls_user: settings.ai_controls_user ?? false,
       story_mode: (settings.story_mode as 'simple' | 'realistic' | 'game') ?? 'simple', // <-- ДОБАВЛЕНО
+      world_state: settings.world_state,
+      user_avatar_path: resolveMediaUrl(settings.user_avatar_path) ?? settings.user_avatar_path ?? null,
     },
+    avatars: (data.avatars ?? []).map(a => ({ ...a, image_path: resolveMediaUrl(a.image_path) ?? a.image_path })),
     messages: (data.messages ?? []).map(normalizeMessage), created_at: data.created_at,
   };
 }
@@ -149,6 +169,32 @@ export const api = {
 
   updateCardImages: (type: 'world' | 'character', id: string, image_variants: string[], selected_image_index: number) => 
     request<{ status: string }>(`/catalog/${type}/${id}/images`, { method: 'PATCH', body: JSON.stringify({ image_variants, selected_image_index }) }),
+
+  // СВЯЗИ КАРТОЧКИ ПЕРСОНАЖА: МИРЫ И АВАТАРКИ
+  getCharacterWorlds: (cardId: string) => request<CharacterWorldLink[]>(`/catalog/characters/${cardId}/worlds`),
+  getCharacterAvatars: async (cardId: string): Promise<CharacterAvatarInfo[]> => {
+    const rows = await request<CharacterAvatarInfo[]>(`/catalog/characters/${cardId}/avatars`);
+    return rows.map(a => ({ ...a, image_path: resolveMediaUrl(a.image_path) ?? a.image_path }));
+  },
+  getDialogueAvatars: async (dialogueId: string): Promise<CharacterAvatarInfo[]> => {
+    const rows = await request<CharacterAvatarInfo[]>(`/dialogues/${dialogueId}/avatars`);
+    return rows.map(a => ({ ...a, image_path: resolveMediaUrl(a.image_path) ?? a.image_path }));
+  },
+  uploadDialogueAvatar: async (dialogueId: string, file: File, characterCardId?: string): Promise<CharacterAvatarInfo> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (characterCardId) formData.append('character_card_id', characterCardId);
+    const avatar = await requestForm<CharacterAvatarInfo>(`/dialogues/${dialogueId}/avatar`, formData);
+    return { ...avatar, image_path: resolveMediaUrl(avatar.image_path) ?? avatar.image_path };
+  },
+
+  /** Индивидуальный аватар пользователя для конкретного мира (чата) */
+  uploadUserAvatar: async (dialogueId: string, file: File): Promise<{ dialogue_id: string; image_path: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const data = await requestForm<{ dialogue_id: string; image_path: string }>(`/dialogues/${dialogueId}/user-avatar`, formData);
+    return { ...data, image_path: resolveMediaUrl(data.image_path) ?? data.image_path };
+  },
 
   deleteCard: (type: 'world' | 'character', id: string) => request<{ status: string }>(`/catalog/${type}/${id}`, { method: 'DELETE' }),
 
