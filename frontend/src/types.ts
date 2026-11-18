@@ -74,6 +74,8 @@ export interface DialogueSettings {
   world_state?: WorldState;
   /** Индивидуальный аватар пользователя для этого мира (чата) */
   user_avatar_path?: string | null;
+  /** Выбранные для чата аватарки: character_card_id → avatar_id */
+  selected_avatar_ids?: Record<string, string>;
 }
 
 /** Аватарка, привязанная к миру (чату) */

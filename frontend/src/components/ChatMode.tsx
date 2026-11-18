@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, ChangeEvent, KeyboardEvent, ReactNode } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../store';
-import { ArrowLeft, ImagePlus, RefreshCw, ChevronLeft, ChevronRight, BookOpen, Server, Send, Terminal, Square, Settings, Loader2, User } from 'lucide-react';
+import { ArrowLeft, ImagePlus, RefreshCw, ChevronLeft, ChevronRight, BookOpen, Server, Send, Terminal, Square, Settings, Loader2, User, Book } from 'lucide-react';
 import { Message, TextBlock } from '../types';
 import { SceneImage } from './SceneImage';
 import { OllamaSettingsModal } from './OllamaSettingsModal';
@@ -49,8 +49,13 @@ export function ChatMode() {
   const narratorAvatar = worldData?.image_variants?.[worldData.selected_image_index]
     ?? worldData?.image_variants?.[0]
     ?? null;
-  const avatarForCard = (cardId?: string | null) =>
-    cardId ? (dialogueAvatars.find(a => a.character_card_id === cardId)?.image_path ?? null) : null;
+  const avatarForCard = (cardId?: string | null) => {
+    if (!cardId) return null;
+    const selectedAvatarId = currentDialogue?.settings.selected_avatar_ids?.[cardId];
+    return dialogueAvatars.find(avatar => avatar.id === selectedAvatarId)?.image_path
+      ?? dialogueAvatars.find(avatar => avatar.character_card_id === cardId)?.image_path
+      ?? null;
+  };
   const userAvatarPath = currentDialogue?.settings.user_avatar_path ?? null;
   const messageAvatars = {
     user: userAvatarPath,
@@ -141,8 +146,21 @@ export function ChatMode() {
     };
   }, [id, openDialogue]);
 
-  // Анимация завершения генерации мира: определяет выполненные этапы и запускает показ галочки.
-  // Показываем строго один раз — только сразу после первичного создания мира.
+  useEffect(() => {
+    const worldState = currentDialogue?.settings?.world_state;
+    if (!worldState) return;
+    const completed = [
+      !!worldState.character_backstory && !!worldState.start_location?.name,
+      Array.isArray(worldState.base_locations) && worldState.base_locations.length > 0,
+      Array.isArray(worldState.outfit_sets) && worldState.outfit_sets.length > 0,
+    ];
+    const timers = completed.map((done, index) => done
+      ? setTimeout(() => setWorldStages(previous => ({ ...previous, [`step${index + 1}`]: true })), index * 220)
+      : null);
+    return () => timers.forEach(timer => { if (timer) clearTimeout(timer); });
+  }, [currentDialogue?.settings?.world_state]);
+
+  // Финальная галочка показывается только для только что созданного диалога.
   useEffect(() => {
     if (!isWorldReady || !currentDialogue?.settings?.world_state) return;
     // Диалог открыт повторно (или это обычная генерация) — галочку не показываем
@@ -272,11 +290,11 @@ export function ChatMode() {
           <div className="h-px bg-gray-700 my-1" />
           
           <button onClick={() => { setShowEditSettings(true); setShowSettingsMenu(false); }} className="flex items-center gap-2 p-2 text-sm text-gray-300 hover:bg-gray-700 rounded-lg text-left transition-colors">
-            📝 Настройки мира
+            <Book size={14}/> Настройки мира
           </button>
           
           <button onClick={() => { setShowOllamaSettings(true); setShowSettingsMenu(false); }} className="flex items-center gap-2 p-2 text-sm text-gray-300 hover:bg-gray-700 rounded-lg text-left transition-colors">
-            <Server size={14} /> Настройки Ollama
+            <Server size={14} /> Настройки API
           </button>
         </div>
       )}
@@ -285,8 +303,8 @@ export function ChatMode() {
       {showEditSettings && <EditSettingsModal onClose={() => setShowEditSettings(false)} />}
 
       {/* ОБЛАСТЬ СООБЩЕНИЙ */}
-      <div className="flex-1 overflow-y-auto pt-24 pb-[calc(15rem+env(safe-area-inset-bottom))] px-6 scrollbar-thin" onScroll={handleScroll}>
-        <div className="max-w-4xl mx-auto">
+      <div className="flex-1 overflow-y-auto pt-24 pb-[calc(15rem+env(safe-area-inset-bottom))] px-4 sm:px-6 lg:px-10 scrollbar-thin" onScroll={handleScroll}>
+        <div className="max-w-6xl mx-auto">
           
           {/* Экран загрузки мира */}
           {!isWorldReady && (
@@ -438,15 +456,12 @@ function ChatMessageItem({ message, isLast, avatars, isUploadingUserAvatar, onUs
   const narratorBlocks = currentBlocks.filter(b => b.speaker === 'narrator' && hasText(b));
   const characterBlocks = currentBlocks.filter(b => b.speaker !== 'narrator' && hasText(b));
 
-  // Аватарка персонажа — из карточки, соответствующей первому говорящему в блоке
-  const firstCharacterSpeaker = characterBlocks[0]?.speaker;
-  const characterAvatar = firstCharacterSpeaker ? (avatars.bySpeaker[firstCharacterSpeaker] ?? null) : null;
-
   const assistantCardClass = 'rounded-2xl p-5 bg-surface/60 border border-gray-800/50 backdrop-blur-sm';
+  const characterEntries = characterBlocks.map((block, index) => ({ block, index }));
 
   return (
     <div className={`message-enter flex mb-6 ${isUser ? 'justify-end' : 'justify-start'}`}>
-      <div className="flex max-w-[85%] min-w-0 items-start gap-3">
+      <div className="flex w-full max-w-[92%] min-w-0 items-start gap-3">
         {isUser ? (
           <>
             <div className="min-w-0 flex flex-col items-end gap-3">
@@ -488,25 +503,17 @@ function ChatMessageItem({ message, isLast, avatars, isUploadingUserAvatar, onUs
             )}
 
             {/* Блок 2. Текст/реплика персонажа — аватарка СЛЕВА */}
-            {characterBlocks.length > 0 && (
-              <div className="flex items-start gap-3">
-                <ChatAvatar
-                  src={characterAvatar}
-                  alt={avatars.nameBySpeaker[firstCharacterSpeaker ?? ''] ?? 'Персонаж'}
-                  fallback={<User size={18} className="text-gray-400" />}
-                  title={avatars.nameBySpeaker[firstCharacterSpeaker ?? ''] ?? 'Персонаж'}
-                />
-                <div className={`${assistantCardClass} min-w-0 flex-1`}>
-                  {characterBlocks.map((block, idx) => (
-                    <TextBlockRenderer
-                      key={idx}
-                      block={block}
-                      isFirst={idx === 0}
-                      variant="chat"
-                      speakerLabel={avatars.nameBySpeaker[block.speaker] ?? 'Персонаж'}
-                    />
-                  ))}
-                </div>
+            {characterEntries.length > 0 && (
+              <div className="flex flex-col gap-3">
+                {characterEntries.map(({ block, index }) => {
+                  const name = avatars.nameBySpeaker[block.speaker] ?? 'Персонаж';
+                  return <div key={`${block.speaker}-${index}`} className="flex items-start gap-3">
+                    <ChatAvatar src={avatars.bySpeaker[block.speaker]} alt={name} fallback={<User size={18} className="text-gray-400" />} title={name} />
+                    <div className={`${assistantCardClass} min-w-0 flex-1`}>
+                      <TextBlockRenderer block={block} isFirst variant="chat" speakerLabel={name} />
+                    </div>
+                  </div>;
+                })}
               </div>
             )}
 

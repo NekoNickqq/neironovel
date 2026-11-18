@@ -14,7 +14,7 @@ from database import get_db, Dialogue, DialogueSettings, Message, CharacterCard,
 from config import config
 from ollama_client import ollama_client
 from comfyui_client import comfyui_client
-from utils import build_system_prompt, apply_presets
+from utils import build_system_prompt, apply_presets, build_character_avatar_prompt, build_character_avatar_negative
 from helpers import _run_with_cancel_check
 from image_utils import cleanup_orphan_images
 
@@ -45,6 +45,15 @@ class UpdateDialogueSettingsRequest(BaseModel):
     world_data: Optional[dict] = None
     character_cards: Optional[list] = None
     ai_controls_user: Optional[bool] = None
+    selected_avatar_ids: Optional[dict[str, str]] = None
+
+class SelectDialogueAvatarRequest(BaseModel):
+    avatar_id: str
+
+class GenerateDialogueAvatarRequest(BaseModel):
+    character_card_id: str
+    prompt: Optional[str] = None
+    negative_prompt: Optional[str] = None
 
 # ============ Эндпоинты ============
 
@@ -84,6 +93,7 @@ async def update_dialogue_settings(dialogue_id: str, req: UpdateDialogueSettings
     if req.world_data is not None: settings.world_data = req.world_data
     if req.character_cards is not None: settings.character_cards = req.character_cards
     if req.ai_controls_user is not None: settings.ai_controls_user = req.ai_controls_user
+    if req.selected_avatar_ids is not None: settings.selected_avatar_ids = req.selected_avatar_ids
     db.commit()
 
     # Пересобираем связи «мир ↔ карточки персонажей» при изменении состава персонажей
@@ -112,7 +122,8 @@ async def get_dialogue(dialogue_id: str, db: Session = Depends(get_db)):
         "ai_controls_user": dialogue.settings.ai_controls_user if dialogue.settings else False,
         "story_mode": dialogue.settings.story_mode if dialogue.settings else "simple",
         "world_state": dialogue.settings.world_state if dialogue.settings else {},
-        "user_avatar_path": (dialogue.settings.user_avatar_path or "") if dialogue.settings else ""},
+        "user_avatar_path": (dialogue.settings.user_avatar_path or "") if dialogue.settings else "",
+        "selected_avatar_ids": dialogue.settings.selected_avatar_ids if dialogue.settings else {}},
         "avatars": [{
             "id": a.id,
             "character_card_id": a.character_card_id,
@@ -360,6 +371,58 @@ async def list_dialogue_avatars(dialogue_id: str, db: Session = Depends(get_db))
         "created_at": a.created_at.isoformat(),
     } for a in avatars]
 
+@router.post("/dialogues/{dialogue_id}/avatars/generate")
+async def generate_dialogue_avatar(dialogue_id: str, req: GenerateDialogueAvatarRequest, db: Session = Depends(get_db)):
+    dialogue = db.query(Dialogue).filter(Dialogue.id == dialogue_id).first()
+    if not dialogue or not dialogue.settings:
+        raise HTTPException(404, "Dialogue not found")
+
+    card = next((item for item in (dialogue.settings.character_cards or []) if item.get("id") == req.character_card_id), None)
+    if not card:
+        raise HTTPException(404, "Character card is not part of this dialogue")
+
+    prompt = req.prompt or build_character_avatar_prompt(card, dialogue.settings.world_data)
+    negative_prompt = req.negative_prompt or build_character_avatar_negative(card)
+    try:
+        result = await comfyui_client.generate_image(
+            prompt, negative_prompt, width=768, height=768,
+            subfolder=f"avatars/characters/{req.character_card_id}",
+            image_root=config.GALLERY_PATH, url_root="/gallery", filename_prefix="avatar",
+        )
+    except Exception as error:
+        raise HTTPException(500, f"Avatar generation error: {error}")
+
+    avatar = CharacterAvatar(
+        id=str(uuid.uuid4()), character_card_id=req.character_card_id, dialogue_id=dialogue_id,
+        image_path=result["image_path"], prompt=result.get("prompt") or prompt,
+        negative_prompt=result.get("negative_prompt") or negative_prompt, source="generated",
+    )
+    db.add(avatar)
+    selected = dict(dialogue.settings.selected_avatar_ids or {})
+    selected[req.character_card_id] = avatar.id
+    dialogue.settings.selected_avatar_ids = selected
+    db.commit()
+    return {"id": avatar.id, "character_card_id": avatar.character_card_id, "dialogue_id": dialogue_id,
+            "image_path": avatar.image_path, "prompt": avatar.prompt, "negative_prompt": avatar.negative_prompt,
+            "source": avatar.source, "created_at": avatar.created_at.isoformat()}
+
+@router.put("/dialogues/{dialogue_id}/characters/{character_card_id}/selected-avatar")
+async def select_dialogue_avatar(dialogue_id: str, character_card_id: str, req: SelectDialogueAvatarRequest, db: Session = Depends(get_db)):
+    dialogue = db.query(Dialogue).filter(Dialogue.id == dialogue_id).first()
+    avatar = db.query(CharacterAvatar).filter(
+        CharacterAvatar.id == req.avatar_id,
+        CharacterAvatar.dialogue_id == dialogue_id,
+        CharacterAvatar.character_card_id == character_card_id,
+    ).first()
+    if not dialogue or not dialogue.settings or not avatar:
+        raise HTTPException(404, "Avatar not found")
+    selected = dict(dialogue.settings.selected_avatar_ids or {})
+    selected[character_card_id] = avatar.id
+    dialogue.settings.selected_avatar_ids = selected
+    db.commit()
+    return {"status": "ok", "avatar_id": avatar.id}
+
+
 @router.post("/dialogues/{dialogue_id}/avatar")
 async def upload_dialogue_avatar(
     dialogue_id: str,
@@ -391,7 +454,7 @@ async def upload_dialogue_avatar(
 
     file_hash = hashlib.md5(contents).hexdigest()
     filename = f"{file_hash}.{ext}"
-    target_dir = os.path.join(config.AVATARS_PATH, "uploads", character_card_id)
+    target_dir = os.path.join(config.GALLERY_PATH, "avatars", "characters", character_card_id, "uploads")
     os.makedirs(target_dir, exist_ok=True)
     filepath = os.path.join(target_dir, filename)
 
@@ -399,7 +462,7 @@ async def upload_dialogue_avatar(
         with open(filepath, "wb") as buffer:
             buffer.write(contents)
 
-    image_path = f"/avatars/uploads/{character_card_id}/{filename}"
+    image_path = f"/gallery/avatars/characters/{character_card_id}/uploads/{filename}"
     avatar = CharacterAvatar(
         id=str(uuid.uuid4()),
         character_card_id=character_card_id,
@@ -410,6 +473,9 @@ async def upload_dialogue_avatar(
         source="upload",
     )
     db.add(avatar)
+    selected = dict(dialogue.settings.selected_avatar_ids or {})
+    selected[character_card_id] = avatar.id
+    dialogue.settings.selected_avatar_ids = selected
     db.commit()
 
     return {

@@ -63,6 +63,7 @@ type ApiDialogueFull = {
     story_mode?: string; // <-- ДОБАВЛЕНО
     world_state?: WorldState;
     user_avatar_path?: string | null;
+    selected_avatar_ids?: Record<string, string>;
   }; 
   avatars?: DialogueAvatar[];
   messages: Message[]; 
@@ -107,6 +108,7 @@ export function normalizeDialogue(data: ApiDialogueFull): Dialogue {
       story_mode: (settings.story_mode as 'simple' | 'realistic' | 'game') ?? 'simple', // <-- ДОБАВЛЕНО
       world_state: settings.world_state,
       user_avatar_path: resolveMediaUrl(settings.user_avatar_path) ?? settings.user_avatar_path ?? null,
+      selected_avatar_ids: settings.selected_avatar_ids ?? {},
     },
     avatars: (data.avatars ?? []).map(a => ({ ...a, image_path: resolveMediaUrl(a.image_path) ?? a.image_path })),
     messages: (data.messages ?? []).map(normalizeMessage), created_at: data.created_at,
@@ -188,7 +190,13 @@ export const api = {
     return { ...avatar, image_path: resolveMediaUrl(avatar.image_path) ?? avatar.image_path };
   },
 
-  /** Индивидуальный аватар пользователя для конкретного мира (чата) */
+  generateDialogueAvatar: async (dialogueId: string, characterCardId: string, prompt?: string, negativePrompt?: string): Promise<CharacterAvatarInfo> => {
+    const avatar = await request<CharacterAvatarInfo>(`/dialogues/${dialogueId}/avatars/generate`, { method: 'POST', body: JSON.stringify({ character_card_id: characterCardId, prompt, negative_prompt: negativePrompt }) });
+    return { ...avatar, image_path: resolveMediaUrl(avatar.image_path) ?? avatar.image_path };
+  },
+  selectDialogueAvatar: (dialogueId: string, characterCardId: string, avatarId: string) =>
+    request<{ status: string }>(`/dialogues/${dialogueId}/characters/${characterCardId}/selected-avatar`, { method: 'PUT', body: JSON.stringify({ avatar_id: avatarId }) }),
+
   uploadUserAvatar: async (dialogueId: string, file: File): Promise<{ dialogue_id: string; image_path: string }> => {
     const formData = new FormData();
     formData.append('file', file);
@@ -212,7 +220,7 @@ export const api = {
     return api.getDialogue(dialogue_id);
   },
   deleteDialogue: (id: string) => request<{ status: string }>(`/dialogues/${id}`, { method: 'DELETE' }),
-  updateSettings: (dialogueId: string, body: { world_data?: WorldCard; character_cards?: CharacterCard[]; ai_controls_user?: boolean }) => request<{ status: string }>(`/dialogues/${dialogueId}/settings`, { method: 'PATCH', body: JSON.stringify(body) }),
+  updateSettings: (dialogueId: string, body: { world_data?: WorldCard; character_cards?: CharacterCard[]; ai_controls_user?: boolean; selected_avatar_ids?: Record<string, string> }) => request<{ status: string }>(`/dialogues/${dialogueId}/settings`, { method: 'PATCH', body: JSON.stringify(body) }),
 
   // СООБЩЕНИЯ
   sendMessage: (dialogueId: string, userText: string, generateImage: boolean, model?: string | null, signal?: AbortSignal) =>

@@ -70,6 +70,8 @@ class DialogueSettings(Base):
     world_state = Column(JSON, default=dict)
     # Индивидуальный аватар пользователя для этого мира (чата)
     user_avatar_path = Column(String, default="")
+    # Выбранные аватарки персонажей: {character_card_id: character_avatar_id}
+    selected_avatar_ids = Column(JSON, default=dict)
     dialogue = relationship("Dialogue", back_populates="settings")
 
 class Message(Base):
@@ -140,7 +142,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 COLUMN_MIGRATIONS = {
     "world_cards": {"image_prompt": "TEXT", "image_negative_prompt": "TEXT"},
     "character_cards": {"image_prompt": "TEXT", "image_negative_prompt": "TEXT"},
-    "dialogue_settings": {"user_avatar_path": "TEXT"},
+    "dialogue_settings": {"user_avatar_path": "TEXT", "selected_avatar_ids": "JSON"},
 }
 
 def _apply_column_migrations():

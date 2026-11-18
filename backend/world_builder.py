@@ -5,6 +5,18 @@ from ollama_client import ollama_client
 from utils import extract_json_from_text
 from avatar_builder import generate_avatars_for_dialogue
 
+async def _save_world_state(dialogue_id: str, world_state: dict) -> None:
+    """Сохраняет промежуточный этап, чтобы UI мог показать ход генерации."""
+    db = SessionLocal()
+    try:
+        settings = db.query(DialogueSettings).filter(DialogueSettings.dialogue_id == dialogue_id).first()
+        if settings:
+            settings.world_state = dict(world_state)
+            db.commit()
+    finally:
+        db.close()
+
+
 async def generate_world_state(dialogue_id: str, world_data: dict, character_cards: list):
     print(f"🌍 [World Builder] Начинаю генерацию мира для диалога {dialogue_id}...")
     
@@ -39,6 +51,7 @@ async def generate_world_state(dialogue_id: str, world_data: dict, character_car
         data1 = extract_json_from_text(res1["raw"])
         final_state["character_backstory"] = data1.get("character_backstory", "")
         final_state["start_location"] = data1.get("start_location", {})
+        await _save_world_state(dialogue_id, final_state)
 
         # === ЭТАП 2: Базовые локации мира ===
         print("🌍 [World Builder] Этап 2: Базовые локации...")
@@ -55,6 +68,7 @@ async def generate_world_state(dialogue_id: str, world_data: dict, character_car
         array_match = re.search(r'\[.*\]', res2["raw"], re.DOTALL)
         if array_match:
             final_state["base_locations"] = json.loads(array_match.group(0))
+        await _save_world_state(dialogue_id, final_state)
 
         # === ЭТАП 3: Сеты одежды ===
         print("🌍 [World Builder] Этап 3: Сеты одежды...")
@@ -71,6 +85,7 @@ async def generate_world_state(dialogue_id: str, world_data: dict, character_car
         array_match3 = re.search(r'\[.*\]', res3["raw"], re.DOTALL)
         if array_match3:
             final_state["outfit_sets"] = json.loads(array_match3.group(0))
+        await _save_world_state(dialogue_id, final_state)
 
         # === СОХРАНЕНИЕ ===
         print(f"✅ [World Builder] Успешно сгенерировано! Сохраняю в БД.")
