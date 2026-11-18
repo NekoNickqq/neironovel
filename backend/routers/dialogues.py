@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, BackgroundTasks
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
@@ -6,6 +6,7 @@ import uuid
 import time
 import asyncio
 from datetime import datetime
+from world_builder import generate_world_state
 
 from database import get_db, Dialogue, DialogueSettings, Message
 from ollama_client import ollama_client
@@ -50,13 +51,24 @@ async def list_dialogues(db: Session = Depends(get_db)):
     return [{"id": d.id, "title": d.title, "description": d.settings.world_data.get("name", "") if d.settings else "", "message_count": len(d.messages), "character_count": len(d.settings.character_cards) if d.settings else 0, "created_at": d.created_at.isoformat()} for d in dialogues]
 
 @router.post("/dialogues")
-async def create_dialogue(req: CreateDialogueRequest, db: Session = Depends(get_db)):
+async def create_dialogue(req: CreateDialogueRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     dialogue_id = str(uuid.uuid4())
     dialogue = Dialogue(id=dialogue_id, title=req.title, created_at=datetime.utcnow())
-    settings = DialogueSettings(dialogue_id=dialogue_id, world_data=req.world_data, character_cards=req.character_cards, ai_controls_user=req.ai_controls_user, story_mode=req.story_mode)
+    settings = DialogueSettings(
+        dialogue_id=dialogue_id, 
+        world_data=req.world_data, 
+        character_cards=req.character_cards, 
+        ai_controls_user=req.ai_controls_user, 
+        story_mode=req.story_mode
+    )
     db.add(dialogue)
     db.add(settings)
     db.commit()
+    
+    # ЗАПУСКАЕМ ФОНОВУЮ ГЕНЕРАЦИЮ МИРА
+    # Это не заблокирует ответ, пользователь сразу перейдет в чат
+    background_tasks.add_task(generate_world_state, dialogue_id, req.world_data, req.character_cards)
+    
     return {"dialogue_id": dialogue_id, "status": "created"}
 
 @router.patch("/dialogues/{dialogue_id}/settings")
@@ -74,7 +86,14 @@ async def get_dialogue(dialogue_id: str, db: Session = Depends(get_db)):
     dialogue = db.query(Dialogue).filter(Dialogue.id == dialogue_id).first()
     if not dialogue: raise HTTPException(status_code=404, detail="Dialogue not found")
     messages = [{"id": m.id, "dialogue_id": m.dialogue_id, "role": m.role, "blocks": m.content, "image_path": m.image_path, "image_variants": m.image_variants, "selected_image_index": m.selected_image_index, "has_image": m.has_image, "image_prompt": m.image_prompt, "debug_info": m.debug_info, "text_versions": m.text_versions, "selected_version_index": m.selected_version_index, "original_user_text": m.original_user_text, "parent_id": m.parent_id, "created_at": m.created_at.isoformat()} for m in dialogue.messages]
-    return {"id": dialogue.id, "title": dialogue.title, "settings": {"world_data": dialogue.settings.world_data if dialogue.settings else {}, "character_cards": dialogue.settings.character_cards if dialogue.settings else [], "font_config": dialogue.settings.font_config if dialogue.settings else {}, "ai_controls_user": dialogue.settings.ai_controls_user if dialogue.settings else False, "story_mode": dialogue.settings.story_mode if dialogue.settings else "simple"}, "messages": messages, "created_at": dialogue.created_at.isoformat()}
+    return {"id": dialogue.id, "title": dialogue.title, "settings": {
+        "world_data": dialogue.settings.world_data if dialogue.settings else {},
+        "character_cards": dialogue.settings.character_cards if dialogue.settings else [],
+        "font_config": dialogue.settings.font_config if dialogue.settings else {},
+        "ai_controls_user": dialogue.settings.ai_controls_user if dialogue.settings else False,
+        "story_mode": dialogue.settings.story_mode if dialogue.settings else "simple",
+        "world_state": dialogue.settings.world_state if dialogue.settings else {}},
+        "messages": messages, "created_at": dialogue.created_at.isoformat()}
 
 @router.delete("/dialogues/{dialogue_id}")
 async def delete_dialogue(dialogue_id: str, db: Session = Depends(get_db)):
@@ -98,7 +117,12 @@ async def send_message(req: SendMessageRequest, request: Request, db: Session = 
     db.commit()
     
     history = [{"role": "user", "content": m.content[0]["text"]} if m.role == "user" else {"role": "assistant", "content": "\n".join([f"[{b['speaker']}]: {b['text']}" for b in m.content])} for m in dialogue.messages]
-    system_prompt = build_system_prompt(dialogue.settings.world_data if dialogue.settings else {}, dialogue.settings.character_cards if dialogue.settings else [], dialogue.settings.ai_controls_user if dialogue.settings else False, dialogue.settings.story_mode if dialogue.settings else "simple")
+    system_prompt = build_system_prompt(dialogue.settings.world_data if dialogue.settings else {},
+                                        dialogue.settings.character_cards if dialogue.settings else [],
+                                        dialogue.settings.ai_controls_user if dialogue.settings else False,
+                                        dialogue.settings.story_mode if dialogue.settings else "simple",
+                                        dialogue.settings.world_state if dialogue.settings else {}
+                                        )
     
     assistant_msg_id = str(uuid.uuid4())
     assistant_message = Message(id=assistant_msg_id, dialogue_id=req.dialogue_id, role="assistant", content=[{"speaker": "narrator", "text": "*Генерация...*"}], image_path=None, image_variants=[], selected_image_index=0, has_image=False, image_prompt="", debug_info={"status": "generating"}, text_versions=[], selected_version_index=0, parent_id=user_msg_id, created_at=datetime.utcnow())

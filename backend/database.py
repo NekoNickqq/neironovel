@@ -49,14 +49,12 @@ class DialogueSettings(Base):
     __tablename__ = "dialogue_settings"
     
     dialogue_id = Column(String, ForeignKey("dialogues.id"), primary_key=True)
-    # Теперь здесь храним JSON-снимок (snapshot) выбранного мира
     world_data = Column(JSON, default=dict) 
-    # И JSON-массив выбранных персонажей
     character_cards = Column(JSON, default=list) 
     font_config = Column(JSON, default=lambda: {"narrator": "Cinzel, Georgia, serif", "user": "Inter, sans-serif", "hero": "Roboto, sans-serif", "sidekick": "Open Sans, sans-serif"})
     ai_controls_user = Column(Boolean, default=False)
     story_mode = Column(String, default="simple")
-    
+    world_state = Column(JSON, default=dict)
     dialogue = relationship("Dialogue", back_populates="settings")
 
 class Message(Base):

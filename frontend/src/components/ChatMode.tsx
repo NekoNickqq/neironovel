@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, KeyboardEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../store';
-import { ArrowLeft, ImagePlus, RefreshCw, ChevronLeft, ChevronRight, BookOpen, Server, Send, Terminal, Square } from 'lucide-react';
+import { ArrowLeft, ImagePlus, RefreshCw, ChevronLeft, ChevronRight, BookOpen, Server, Send, Terminal, Square, Settings, Loader2 } from 'lucide-react';
 import { Message } from '../types';
 import { SceneImage } from './SceneImage';
 import { OllamaSettingsModal } from './OllamaSettingsModal';
@@ -22,20 +22,60 @@ export function ChatMode() {
   const [inputText, setInputText] = useState('');
   const [showOllamaSettings, setShowOllamaSettings] = useState(false);
   const [showEditSettings, setShowEditSettings] = useState(false);
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  
+  const [isHeaderVisible, setIsHeaderVisible] = useState(true);
+  const [lastScrollY, setLastScrollY] = useState(0);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Загружаем диалог по ID из URL, если его нет в памяти
-  useEffect(() => {
-    if (id && (!currentDialogue || currentDialogue.id !== id)) {
-      void openDialogue(id);
-    }
-  }, [id, currentDialogue, openDialogue]);
+  // Проверяем, есть ли стартовая локация (признак, что мир сгенерирован)
+  const isWorldReady = !!currentDialogue?.settings?.world_state?.start_location;
 
-  // Скролл вниз при новых сообщениях
+  // Умный поллинг без спама запросов
+  useEffect(() => {
+    let isMounted = true;
+    
+    const checkStatus = async () => {
+      if (!isMounted || isWorldReady || !id) return;
+      
+      try {
+        await openDialogue(id);
+      } catch (e) {
+        console.error("Ошибка обновления статуса", e);
+      }
+      
+      // Если мир еще не готов, ждем 3 секунды и проверяем снова
+      if (isMounted && !isWorldReady) {
+        setTimeout(checkStatus, 3000);
+      }
+    };
+
+    if (!isWorldReady && currentDialogue) {
+      const timer = setTimeout(checkStatus, 3000);
+      return () => {
+        isMounted = false;
+        clearTimeout(timer);
+      };
+    }
+  }, [id, isWorldReady]); // Зависит только от id и статуса готовности
+
   useEffect(() => { 
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); 
-  }, [currentDialogue?.messages.length]);
+    if (isWorldReady) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); 
+    }
+  }, [currentDialogue?.messages.length, isWorldReady]);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const currentScrollY = e.currentTarget.scrollTop;
+    if (currentScrollY > lastScrollY && currentScrollY > 50) {
+      setIsHeaderVisible(false);
+    } else {
+      setIsHeaderVisible(true);
+    }
+    setLastScrollY(currentScrollY);
+  };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { 
@@ -45,13 +85,12 @@ export function ChatMode() {
   };
 
   const handleSend = (withImage: boolean) => {
-    if (!inputText.trim() || state.isGenerating) return;
+    if (!inputText.trim() || state.isGenerating || !isWorldReady) return;
     sendMessage(inputText.trim(), withImage);
     setInputText('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
   };
 
-  // Показываем загрузку, если диалог еще не подгрузился
   if (!currentDialogue || currentDialogue.id !== id) {
     return (
       <div className="h-screen flex items-center justify-center bg-gray-950">
@@ -64,58 +103,100 @@ export function ChatMode() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-gradient-to-b from-gray-950 to-gray-900">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800/50 bg-surface/30 backdrop-blur">
-        <div className="flex items-center gap-4">
-          {/* Возврат в главное меню */}
-          <button onClick={() => navigate('/')} className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-all">
-            <ArrowLeft size={20} />
-          </button>
-          <div>
-            <h2 className="text-lg font-semibold text-white">{currentDialogue.title}</h2>
-            <p className="text-xs text-gray-400">{currentDialogue.description}</p>
-          </div>
+    <div className="h-screen flex flex-col bg-gray-950 relative overflow-hidden">
+      
+      {/* НЕВИДИМАЯ ПАРЯЩАЯ ШАПКА */}
+      <div className={`absolute top-0 left-0 right-0 z-40 transition-transform duration-300 ${isHeaderVisible ? 'translate-y-0' : '-translate-y-full'} flex items-start justify-between px-6 py-4 pointer-events-none`}>
+        
+        {/* Градиент, чтобы текст не сливался с сообщениями */}
+        <div className="absolute inset-0 bg-gradient-to-b from-gray-950 via-gray-950/80 to-transparent -z-10" />
+
+        {/* Кнопка Назад */}
+        <button onClick={() => navigate('/')} className="pointer-events-auto p-2 bg-gray-800/80 backdrop-blur-md rounded-full text-gray-300 hover:text-white mt-2 transition-colors">
+          <ArrowLeft size={20} />
+        </button>
+
+        {/* Центрированные названия */}
+        <div className="flex flex-col items-center flex-1 mt-2 pointer-events-auto">
+          <span className="text-xs text-gray-400 font-medium drop-shadow-md uppercase tracking-wider">
+            {currentDialogue.description || "Безымянный мир"}
+          </span>
+          <span className="text-xl font-bold text-white drop-shadow-md">
+            {currentDialogue.title}
+          </span>
         </div>
-        <div className="flex items-center gap-2">
-          <select 
-            value={state.selectedOllamaModel ?? ''} 
-            onChange={e => setSelectedOllamaModel(e.target.value || null)} 
-            className="max-w-[220px] rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 focus:border-purple-500 outline-none"
-          >
-            {state.ollamaModels.length === 0 && <option value="">Нет моделей</option>}
-            {state.ollamaModels.map(m => <option key={m} value={m}>{m}</option>)}
-            {state.selectedOllamaModel && !state.ollamaModels.includes(state.selectedOllamaModel) && <option value={state.selectedOllamaModel}>{state.selectedOllamaModel}</option>}
-          </select>
-          <button onClick={() => void refreshOllamaModels()} className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-all" title="Обновить модели">
-            <RefreshCw size={16} />
+
+        {/* Кнопки справа (ВН режим и Настройки) */}
+        <div className="flex gap-2 pointer-events-auto mt-2">
+          <button onClick={() => navigate('/novel/' + currentDialogue.id)} className="p-2 bg-purple-600/80 backdrop-blur-md rounded-full text-white hover:bg-purple-500 transition-colors" title="Режим ВН">
+            <BookOpen size={20} />
           </button>
-          <button onClick={() => setShowOllamaSettings(true)} className="flex items-center gap-2 px-3 py-2 bg-gray-800/50 hover:bg-gray-800 border border-gray-700 rounded-lg text-gray-300 text-sm transition-all">
-            <Server size={16} /> Ollama
-          </button>
-          <button onClick={() => setShowEditSettings(true)} className="flex items-center gap-2 px-3 py-2 bg-gray-800/50 hover:bg-gray-800 border border-gray-700 rounded-lg text-gray-300 text-sm transition-all">
-            📝 Настройки мира
-          </button>
-          {/* Переход в режим визуальной новеллы */}
-          <button onClick={() => navigate('/novel/' + currentDialogue.id)} className="flex items-center gap-2 px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-600/30 rounded-lg text-purple-300 text-sm transition-all">
-            <BookOpen size={16} /> Режим ВН
+          <button onClick={() => setShowSettingsMenu(!showSettingsMenu)} className="p-2 bg-gray-800/80 backdrop-blur-md rounded-full text-white hover:bg-gray-700 transition-colors" title="Настройки">
+            <Settings size={20} />
           </button>
         </div>
       </div>
 
+      {/* Выпадающее меню настроек */}
+      {showSettingsMenu && (
+        <div className="absolute top-20 right-6 w-64 bg-gray-800 rounded-xl shadow-2xl border border-gray-700 p-2 z-50 flex flex-col gap-1 animate-fade-in pointer-events-auto">
+          <div className="px-2 py-1 text-xs text-gray-500 uppercase font-semibold">Модель</div>
+          <select 
+            value={state.selectedOllamaModel ?? ''} 
+            onChange={e => setSelectedOllamaModel(e.target.value || null)} 
+            className="w-full bg-gray-900 text-sm text-white p-2 rounded-lg outline-none border border-gray-700 mb-1"
+          >
+            {state.ollamaModels.length === 0 && <option value="">Нет моделей</option>}
+            {state.ollamaModels.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+          
+          <button onClick={() => void refreshOllamaModels()} className="flex items-center gap-2 p-2 text-sm text-gray-300 hover:bg-gray-700 rounded-lg text-left transition-colors">
+            <RefreshCw size={14} /> Обновить список
+          </button>
+          
+          <div className="h-px bg-gray-700 my-1" />
+          
+          <button onClick={() => { setShowEditSettings(true); setShowSettingsMenu(false); }} className="flex items-center gap-2 p-2 text-sm text-gray-300 hover:bg-gray-700 rounded-lg text-left transition-colors">
+            📝 Настройки мира
+          </button>
+          
+          <button onClick={() => { setShowOllamaSettings(true); setShowSettingsMenu(false); }} className="flex items-center gap-2 p-2 text-sm text-gray-300 hover:bg-gray-700 rounded-lg text-left transition-colors">
+            <Server size={14} /> Настройки Ollama
+          </button>
+        </div>
+      )}
+
       {showOllamaSettings && <OllamaSettingsModal onClose={() => setShowOllamaSettings(false)} />}
       {showEditSettings && <EditSettingsModal onClose={() => setShowEditSettings(false)} />}
 
-      <div className="flex-1 overflow-y-auto px-6 py-6 scrollbar-thin">
+      {/* ОБЛАСТЬ СООБЩЕНИЙ */}
+      <div className="flex-1 overflow-y-auto pt-24 pb-24 px-6 scrollbar-thin" onScroll={handleScroll}>
         <div className="max-w-4xl mx-auto">
-          {currentDialogue.messages.length === 0 && (
-            <div className="text-center py-20">
+          
+          {/* Экран загрузки мира */}
+          {!isWorldReady && (
+            <div className="flex flex-col items-center justify-center h-[60vh] text-center animate-fade-in">
+              <Loader2 size={48} className="animate-spin text-purple-500 mb-6" />
+              <h2 className="text-2xl font-bold text-white mb-2">Генерация мира...</h2>
+              <p className="text-gray-400 max-w-md">Нейросеть создает предысторию, базовые локации и сеты одежды. Пожалуйста, подождите.</p>
+              <div className="mt-6 flex flex-wrap justify-center gap-2 text-sm text-gray-500">
+                <span className="px-3 py-1 bg-gray-800 rounded-full border border-gray-700">Шаг 1: Предыстория</span>
+                <span className="px-3 py-1 bg-gray-800 rounded-full border border-gray-700">Шаг 2: Локации</span>
+                <span className="px-3 py-1 bg-gray-800 rounded-full border border-gray-700">Шаг 3: Одежда</span>
+              </div>
+            </div>
+          )}
+
+          {/* Приветствие */}
+          {isWorldReady && currentDialogue.messages.length === 0 && (
+            <div className="text-center py-20 animate-fade-in">
               <div className="text-6xl mb-4">🎭</div>
-              <p className="text-gray-400 text-lg">Начни свою историю...</p>
-              <p className="text-gray-500 text-sm mt-2">Напиши первое сообщение ниже</p>
+              <p className="text-gray-400 text-lg">Мир готов. Начни свою историю...</p>
             </div>
           )}
           
-          {currentDialogue.messages.map((msg, idx) => (
+          {/* Сообщения */}
+          {isWorldReady && currentDialogue.messages.map((msg, idx) => (
             <ChatMessageItem 
               key={msg.id} 
               message={msg} 
@@ -137,7 +218,7 @@ export function ChatMode() {
                     <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                   </div>
                   <span className="text-gray-400 text-sm">ИИ генерирует ответ...</span>
-                  <button onClick={stopGeneration} className="ml-2 flex items-center gap-1 px-3 py-1 bg-red-600/20 hover:bg-red-600/40 border border-red-600/50 rounded text-red-300 text-xs transition-colors" title="Остановить генерацию">
+                  <button onClick={stopGeneration} className="ml-2 flex items-center gap-1 px-3 py-1 bg-red-600/20 hover:bg-red-600/40 border border-red-600/50 rounded text-red-300 text-xs transition-colors">
                     <Square size={12} fill="currentColor" /> Стоп
                   </button>
                 </div>
@@ -148,9 +229,10 @@ export function ChatMode() {
         </div>
       </div>
 
-      <div className="border-t border-gray-800/50 bg-surface/30 backdrop-blur px-6 py-4">
+      {/* ПОЛЕ ВВОДА */}
+      <div className="border-t border-gray-800/50 bg-surface/30 backdrop-blur px-6 py-4 absolute bottom-0 left-0 right-0">
         <div className="max-w-4xl mx-auto">
-          <div className="relative flex items-end gap-2 rounded-xl border border-gray-700 bg-gray-900/50 p-2 pr-[72px] focus-within:border-purple-500 transition-colors">
+          <div className={`relative flex items-end gap-2 rounded-xl border ${!isWorldReady ? 'border-gray-800 opacity-50 bg-gray-900/30' : 'border-gray-700 bg-gray-900/50'} p-2 pr-[72px] focus-within:border-purple-500 transition-colors`}>
             <textarea
               ref={textareaRef} 
               value={inputText}
@@ -160,16 +242,16 @@ export function ChatMode() {
                 e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px'; 
               }}
               onKeyDown={handleKeyDown} 
-              placeholder="Опиши действие или реплику... (Enter — с картинкой, Shift+Enter — перенос)" 
+              placeholder={isWorldReady ? "Опиши действие или реплику... (Enter — с картинкой, Shift+Enter — перенос)" : "Ожидание генерации мира..."} 
               rows={3}
               className="w-full max-h-40 min-h-[72px] resize-none bg-transparent px-2 py-1.5 text-white placeholder-gray-500 focus:outline-none overflow-y-auto scrollbar-thin" 
-              disabled={state.isGenerating}
+              disabled={state.isGenerating || !isWorldReady}
             />
             <div className="absolute right-2 bottom-2 flex flex-col gap-2">
-              <button onClick={() => handleSend(true)} disabled={state.isGenerating || !inputText.trim()} className="flex h-9 w-9 items-center justify-center rounded-full bg-purple-600 text-white shadow-lg shadow-purple-600/20 transition-all hover:bg-purple-500 disabled:bg-gray-800 disabled:text-gray-600 disabled:shadow-none" title="Отправить: Текст + Картинка (Enter)">
+              <button onClick={() => handleSend(true)} disabled={state.isGenerating || !inputText.trim() || !isWorldReady} className="flex h-9 w-9 items-center justify-center rounded-full bg-purple-600 text-white shadow-lg shadow-purple-600/20 transition-all hover:bg-purple-500 disabled:bg-gray-800 disabled:text-gray-600 disabled:shadow-none">
                 <ImagePlus size={16} />
               </button>
-              <button onClick={() => handleSend(false)} disabled={state.isGenerating || !inputText.trim()} className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-700 text-gray-300 transition-all hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600" title="Отправить: только текст (Shift+Enter)">
+              <button onClick={() => handleSend(false)} disabled={state.isGenerating || !inputText.trim() || !isWorldReady} className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-700 text-gray-300 transition-all hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600">
                 <Send size={15} />
               </button>
             </div>
@@ -180,7 +262,6 @@ export function ChatMode() {
   );
 }
 
-// Компонент отдельного сообщения (без изменений)
 function ChatMessageItem({ message, isLast, onRegenerateText, onRegenerateImage, onSelectImage, onSelectVersion }: { message: Message; isLast: boolean; onRegenerateText: (id: string) => void; onRegenerateImage: (id: string, mode: 'same' | 'new') => void; onSelectImage: (messageId: string, index: number) => void; onSelectVersion: (messageId: string, index: number) => void; }) {
   const isUser = message.role === 'user';
   const [showDebug, setShowDebug] = useState(false);

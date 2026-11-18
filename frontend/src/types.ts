@@ -24,12 +24,30 @@ export interface CharacterCard {
   color?: string;
 }
 
+export interface WorldState {
+  character_backstory?: string;
+  start_location?: {
+    name: string;
+    visual: string;
+    atmosphere: string;
+  };
+  base_locations?: Array<{
+    name: string;
+    visual: string;
+  }>;
+  outfit_sets?: Array<{
+    name: string;
+    tags: string;
+  }>;
+}
+
 export interface DialogueSettings {
   world_data: WorldCard;
   character_cards: CharacterCard[];
   font_config: any;
   ai_controls_user: boolean;
   story_mode: 'simple' | 'realistic' | 'game';
+  world_state?: WorldState;
 }
 
 export interface DebugInfo { status?: string; error_message?: string; system_prompt?: string; history_sent?: any[]; model?: string; raw_response?: string; thinking?: string; timings_ms?: { ollama: number; comfyui: number }; image_prompt_used?: string; negative_prompt_used?: string; comfyui_info?: any; }
